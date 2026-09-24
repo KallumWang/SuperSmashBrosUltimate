@@ -1,0 +1,41 @@
+[gd_scene load_steps=2 format=3]
+
+[sub_resource type="RectangleShape2D" id="PlatformShape"]
+size = Vector2(700, 60)
+
+[node name="Stage" type="Node2D"]
+
+[node name="Background" type="ColorRect" parent="."]
+offset_left = -700.0
+offset_top = -500.0
+offset_right = 700.0
+offset_bottom = 500.0
+color = Color(0.45, 0.7, 0.95, 1)
+
+[node name="Platform" type="StaticBody2D" parent="."]
+position = Vector2(0, 200)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Platform"]
+shape = SubResource("PlatformShape")
+
+[node name="PlatformVisual" type="ColorRect" parent="Platform"]
+offset_left = -350.0
+offset_top = -30.0
+offset_right = 350.0
+offset_bottom = 30.0
+color = Color(0.35, 0.65, 0.35, 1)
+
+[node name="SpawnP1" type="Marker2D" parent="."]
+position = Vector2(-270, 80)
+
+[node name="SpawnP2" type="Marker2D" parent="."]
+position = Vector2(-90, 80)
+
+[node name="SpawnP3" type="Marker2D" parent="."]
+position = Vector2(90, 80)
+
+[node name="SpawnP4" type="Marker2D" parent="."]
+position = Vector2(270, 80)
+
+[node name="Camera2D" type="Camera2D" parent="."]
+position = Vector2(0, 100)

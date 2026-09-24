@@ -1,0 +1,130 @@
+[gd_scene format=3 uid="uid://bgsmxju67la1d"]
+
+[ext_resource type="Script" uid="uid://cr6tgcgg2tyir" path="res://scripts/character_select.gd" id="1"]
+
+[sub_resource type="StyleBoxFlat" id="PanelStyle"]
+bg_color = Color(0.13, 0.14, 0.2, 1)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.3, 0.32, 0.4, 1)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+[sub_resource type="StyleBoxFlat" id="CursorStyle"]
+bg_color = Color(1, 1, 1, 0)
+border_width_left = 4
+border_width_top = 4
+border_width_right = 4
+border_width_bottom = 4
+border_color = Color(1, 0.9, 0.2, 1)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+[node name="CharacterSelect" type="Control" unique_id=1994792561]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("1")
+
+[node name="Background" type="ColorRect" parent="." unique_id=1167064086]
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+color = Color(0.06, 0.07, 0.1, 1)
+
+[node name="VBox" type="VBoxContainer" parent="." unique_id=483648714]
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 40.0
+offset_top = 24.0
+offset_right = -40.0
+offset_bottom = -24.0
+theme_override_constants/separation = 16
+
+[node name="Title" type="Label" parent="VBox" unique_id=705890666]
+layout_mode = 2
+theme_override_font_sizes/font_size = 30
+text = "CHARACTER SELECT"
+horizontal_alignment = 1
+
+[node name="Main" type="HBoxContainer" parent="VBox" unique_id=1191243076]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/separation = 24
+
+[node name="GridPanel" type="PanelContainer" parent="VBox/Main" unique_id=1307293186]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_styles/panel = SubResource("PanelStyle")
+
+[node name="CharacterGrid" type="GridContainer" parent="VBox/Main/GridPanel" unique_id=634862306]
+layout_mode = 2
+theme_override_constants/h_separation = 16
+theme_override_constants/v_separation = 16
+columns = 4
+
+[node name="PreviewPanel" type="PanelContainer" parent="VBox/Main" unique_id=1110048441]
+custom_minimum_size = Vector2(220, 0)
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_styles/panel = SubResource("PanelStyle")
+
+[node name="PreviewVBox" type="VBoxContainer" parent="VBox/Main/PreviewPanel" unique_id=1081571222]
+layout_mode = 2
+theme_override_constants/separation = 12
+alignment = 1
+
+[node name="PreviewSwatch" type="ColorRect" parent="VBox/Main/PreviewPanel/PreviewVBox" unique_id=859103318]
+custom_minimum_size = Vector2(150, 150)
+layout_mode = 2
+size_flags_horizontal = 4
+color = Color(0.85, 0.2, 0.2, 1)
+
+[node name="PreviewFace" type="ColorRect" parent="VBox/Main/PreviewPanel/PreviewVBox/PreviewSwatch" unique_id=642818036]
+layout_mode = 0
+offset_left = 65.0
+offset_top = 65.0
+offset_right = 85.0
+offset_bottom = 85.0
+color = Color(0, 0, 0, 1)
+
+[node name="PreviewName" type="Label" parent="VBox/Main/PreviewPanel/PreviewVBox" unique_id=1014675617]
+layout_mode = 2
+text = "Guy Red"
+horizontal_alignment = 1
+
+[node name="Bottom" type="HBoxContainer" parent="VBox" unique_id=1074263461]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="BackButton" type="Button" parent="VBox/Bottom" unique_id=692243997]
+layout_mode = 2
+text = "BACK"
+
+[node name="CpuHint" type="Label" parent="VBox/Bottom" unique_id=716830617]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "CPU will play as: Guy Blue"
+horizontal_alignment = 1
+
+[node name="ConfirmButton" type="Button" parent="VBox/Bottom" unique_id=46055099]
+custom_minimum_size = Vector2(140, 0)
+layout_mode = 2
+text = "CONFIRM"
+
+[node name="SelectionCursor" type="Panel" parent="." unique_id=1518458914]
+layout_mode = 0
+mouse_filter = 2
+theme_override_styles/panel = SubResource("CursorStyle")
+
+[connection signal="pressed" from="VBox/Bottom/BackButton" to="." method="_on_back_pressed"]
+[connection signal="pressed" from="VBox/Bottom/ConfirmButton" to="." method="_on_confirm_pressed"]
