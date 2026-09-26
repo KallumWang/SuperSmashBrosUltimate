@@ -1,11 +1,6 @@
 extends Control
-## Host/join screen for online mode. HOST GAME generates a room code and
-## connects to the relay; JOIN GAME connects using a code someone else
-## generated. Neither one is a "server" in the networking sense - both are
-## WebSocket clients of the relay (see autoload/NetworkManager.gd and
-## /relay_server). Once the relay reports both players connected, each
-## side independently moves on to Character Select.
 
+#Some variables which are very important
 @onready var status_label: Label = $VBox/StatusLabel
 @onready var room_code_input: LineEdit = $VBox/RoomCodeInput
 @onready var room_code_label: Label = $VBox/RoomCodeRow/RoomCodeLabel

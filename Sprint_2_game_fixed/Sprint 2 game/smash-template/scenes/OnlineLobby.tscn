@@ -1,18 +1,22 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene format=3 uid="uid://ctmt4abm38hyt"]
 
-[ext_resource type="Script" path="res://scripts/online_lobby.gd" id="1"]
+[ext_resource type="Script" uid="uid://cwrpdchh0iafm" path="res://scripts/online_lobby.gd" id="1"]
 
-[node name="OnlineLobby" type="Control"]
+[node name="OnlineLobby" type="Control" unique_id=350650384]
+layout_mode = 3
+anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 script = ExtResource("1")
 
-[node name="Background" type="ColorRect" parent="."]
+[node name="Background" type="ColorRect" parent="." unique_id=962595677]
+layout_mode = 0
 anchor_right = 1.0
 anchor_bottom = 1.0
 color = Color(0.09, 0.1, 0.16, 1)
 
-[node name="VBox" type="VBoxContainer" parent="."]
+[node name="VBox" type="VBoxContainer" parent="." unique_id=284233747]
+layout_mode = 0
 anchor_left = 0.5
 anchor_top = 0.5
 anchor_right = 0.5
@@ -21,44 +25,51 @@ offset_left = -190.0
 offset_top = -150.0
 offset_right = 190.0
 offset_bottom = 150.0
-alignment = 1
 theme_override_constants/separation = 10
+alignment = 1
 
-[node name="Title" type="Label" parent="VBox"]
-horizontal_alignment = 1
+[node name="Title" type="Label" parent="VBox" unique_id=936793232]
+layout_mode = 2
 text = "ONLINE"
-
-[node name="RoomCodeRow" type="HBoxContainer" parent="VBox"]
-alignment = 1
-theme_override_constants/separation = 10
-
-[node name="RoomCodeLabel" type="Label" parent="VBox/RoomCodeRow"]
-theme_override_font_sizes/font_size = 22
-theme_override_colors/font_color = Color(1, 0.9, 0.2, 1)
 horizontal_alignment = 1
-text = ""
 
-[node name="CopyButton" type="Button" parent="VBox/RoomCodeRow"]
-text = "COPY"
+[node name="RoomCodeRow" type="HBoxContainer" parent="VBox" unique_id=1394363200]
+layout_mode = 2
+theme_override_constants/separation = 10
+alignment = 1
+
+[node name="RoomCodeLabel" type="Label" parent="VBox/RoomCodeRow" unique_id=1872076984]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.9, 0.2, 1)
+theme_override_font_sizes/font_size = 22
+horizontal_alignment = 1
+
+[node name="CopyButton" type="Button" parent="VBox/RoomCodeRow" unique_id=508093805]
 visible = false
+layout_mode = 2
+text = "COPY"
 
-[node name="RoomCodeInput" type="LineEdit" parent="VBox"]
+[node name="RoomCodeInput" type="LineEdit" parent="VBox" unique_id=996583140]
+layout_mode = 2
 placeholder_text = "Room code from host"
 
-[node name="HostButton" type="Button" parent="VBox"]
+[node name="HostButton" type="Button" parent="VBox" unique_id=1956385797]
 custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
 text = "HOST GAME"
 
-[node name="JoinButton" type="Button" parent="VBox"]
+[node name="JoinButton" type="Button" parent="VBox" unique_id=1324802827]
 custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
 text = "JOIN GAME"
 
-[node name="StatusLabel" type="Label" parent="VBox"]
+[node name="StatusLabel" type="Label" parent="VBox" unique_id=551890102]
+layout_mode = 2
 horizontal_alignment = 1
 autowrap_mode = 2
-text = ""
 
-[node name="BackButton" type="Button" parent="VBox"]
+[node name="BackButton" type="Button" parent="VBox" unique_id=1690635679]
+layout_mode = 2
 text = "BACK"
 
 [connection signal="pressed" from="VBox/RoomCodeRow/CopyButton" to="." method="_on_copy_code_pressed"]
