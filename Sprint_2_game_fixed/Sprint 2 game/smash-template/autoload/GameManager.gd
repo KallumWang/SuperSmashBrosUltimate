@@ -10,24 +10,25 @@ var is_cpu_p2: bool = false
 var online_opponent_character: int = 1 # set once the other player picks in online Character Select
 
 # Up to 3 local CPU opponents for free-for-alls. Toggle "enabled" and
-# cycle "character" from the CPU Opponents screen (CpuSetup.tscn).
+
 var cpu_slots: Array = [
 	{"enabled": true, "character": 1},
 	{"enabled": false, "character": 2},
 	{"enabled": false, "character": 3},
 ]
 
-# Each entry fully defines a playable character. Movement fields feed
+#Movement
 # player.gd's physics directly. "attacks" has four moves - "neutral"
 # (plain attack button), "up" (hold up/jump + attack), "down" (hold
 # down + attack), and "back" (a pivot strike - reverse direction and
 # hit attack in the same beat to strike behind you) - each with its own
-# damage/knockback/range/angle, so different characters genuinely play
+# damage/knockback/range/angle, so different charactersplay
 # differently.
-#   speed/jump_velocity/gravity_scale/extra_jumps - movement feel
-#   weight       - how much knockback they take (lighter flies further)
-#   attacks.*.hits  - >1 means a quick multi-hit flurry
-#   attacks.*.angle - knockback launch angle in degrees (0 = flat, 90 = straight up)
+# speed/jump_velocity/gravity_scale/extra_jumps - movement feel
+# weight - how much knockback they take (lighter flies further)
+# attacks.*.hits  - >1 means a quick multi-hit flurry
+# attacks.*.angle - knockback launch angle in degrees
+#Basically just the Character's stats TS THE MOST IMPORTANT COMMENT SORTA
 var characters: Array = [
 	{
 		"name": "Guy Red",
@@ -77,6 +78,21 @@ var characters: Array = [
 	{
 		"name": "Guy Yellow",
 		"color": Color(0.95, 0.8, 0.15),
+		"speed": 380.0,
+		"jump_velocity": -640.0,
+		"gravity_scale": 0.7,
+		"extra_jumps": 2,
+		"weight": 0.8,
+		"attacks": {
+			"neutral": {"damage": 3.0, "kb_base": 50.0, "kb_scale": 4.0, "range": 26.0, "startup": 0.04, "active": 0.3, "cooldown": 0.35, "hits": 3, "angle": 35.0},
+			"up":      {"damage": 9.0, "kb_base": 130.0, "kb_scale": 6.0, "range": 24.0, "startup": 0.05, "active": 0.08, "cooldown": 0.3, "hits": 1, "angle": 85.0},
+			"down":    {"damage": 6.0, "kb_base": 90.0, "kb_scale": 4.5, "range": 22.0, "startup": 0.04, "active": 0.1, "cooldown": 0.3, "hits": 1, "angle": 15.0},
+			"back":    {"damage": 4.0, "kb_base": 70.0, "kb_scale": 4.0, "range": 24.0, "startup": 0.03, "active": 0.12, "cooldown": 0.3, "hits": 1, "angle": 30.0},
+		},
+	}, # Added missing closing bracket here
+	{
+		"name": "Guy black",
+		"color": Color(0.0, 0.0, 0.0),
 		"speed": 380.0,
 		"jump_velocity": -640.0,
 		"gravity_scale": 0.7,

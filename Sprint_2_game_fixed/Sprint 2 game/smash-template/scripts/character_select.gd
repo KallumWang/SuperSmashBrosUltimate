@@ -1,13 +1,6 @@
 extends Control
-
-## Local mode: this picks YOUR character; CPU opponents are configured on
-## the next screen (CpuSetup.tscn).
-##
-## Online mode: both connected players land here after OnlineLobby reports
-## the relay room is full. Each picks independently; CONFIRM sends your
-## pick to the other player over the relay, and once both picks are in,
-## each side moves on to Game.tscn on its own (no single "host says go" -
-## everything here is symmetric between the two players).
+#this code should work for both CPU and Online
+#Hopefully it works how I intended and Online both players use WASD F
 
 @onready var grid: GridContainer = $VBox/Main/GridPanel/CharacterGrid
 @onready var cursor: Panel = $SelectionCursor
