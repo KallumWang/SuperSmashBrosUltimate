@@ -1,0 +1,10 @@
+res://autoload/PostFX.tscn::a3995223310322543d4a870e9e009e60::1790306827::res://.godot/exported/133200997/export-ec769b2b3899e3be008819c409ebc7db-PostFX.scn
+res://autoload/ScreenFX.tscn::51efb69017790f47a6dbfacfe9fe581c::1790306827::res://.godot/exported/133200997/export-e113c795bf86c417514180da61cdb221-ScreenFX.scn
+res://scenes/CharacterSelect.tscn::091d9204851adb6eb5f0b6473833a789::1790306827::res://.godot/exported/133200997/export-3925af4e30f501cd1cabc6e961f22f4b-CharacterSelect.scn
+res://scenes/CpuSetup.tscn::2735460a0050bb5243d03eca4b628230::1790306827::res://.godot/exported/133200997/export-bb0b1ca3f9870b4dfeaa04e7ed218442-CpuSetup.scn
+res://scenes/Game.tscn::703c880c6f5b2aa05ea3417ecb8c556e::1790306827::res://.godot/exported/133200997/export-ff8ceb9b2bd5b48777d3d52e811276ab-Game.scn
+res://scenes/ModeSelect.tscn::e0327eb11684ff1d8aa51d4a82b66144::1790306827::res://.godot/exported/133200997/export-0327981ceede7fd8978b775504c38b50-ModeSelect.scn
+res://scenes/OnlineLobby.tscn::137b1e9eeb76d12a91c6edd978dae348::1790306827::res://.godot/exported/133200997/export-bc00c03c248c53fba183b23058a89912-OnlineLobby.scn
+res://scenes/Player.tscn::889d2d975479555187e8055bd47fe8b8::1790306827::res://.godot/exported/133200997/export-e8220e74d1354b9e6b168b513689419c-Player.scn
+res://scenes/Stage.tscn::b2c57a8ceac9fcd4edea79fd0de1569a::1790306827::res://.godot/exported/133200997/export-a052809fc56e34ae2aae07b310f0ea5b-Stage.scn
+res://scenes/StartScreen.tscn::f4d9027393db7410a11681ba2d6651e7::1790306827::res://.godot/exported/133200997/export-a4da42acfdfb10a83518cbc3f683eea0-StartScreen.scn
