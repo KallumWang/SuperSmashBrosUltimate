@@ -1,4 +1,0 @@
-res://scenes/OnlineLobby.tscn
-res://scripts/online_lobby.gd
-res://scripts/character_select.gd
-res://autoload/GameManager.gd
