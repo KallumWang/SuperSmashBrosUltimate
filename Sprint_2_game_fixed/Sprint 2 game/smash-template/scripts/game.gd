@@ -1,14 +1,11 @@
 extends Node2D
-## Spawns fighters onto the stage: you (P1) plus however many CPU slots
-## are toggled on (local mode, up to 3 CPUs), or you + one networked
-## opponent (online mode). Also builds and updates the bottom Smash-style
-## HUD (name / damage% / stock pips per fighter).
 
 const PLAYER_SCENE := preload("res://scenes/Player.tscn")
 const SPAWN_NAMES := ["SpawnP1", "SpawnP2", "SpawnP3", "SpawnP4"]
 
 @onready var stage: Node2D = $Stage
 @onready var players_root: Node2D = $Players
+@onready var bottom_bar: ColorRect = $HUD/BottomBar
 @onready var hud_entries_box: HBoxContainer = $HUD/BottomBar/Entries
 
 var hud_entries: Array = []
@@ -16,10 +13,23 @@ var local_player: SmashPlayer
 var remote_player: SmashPlayer
 
 func _ready() -> void:
+	randomize()
+	
+	# Keep HUD locked to the bottom of the screen on any resolution
+	get_viewport().size_changed.connect(_update_hud_layout)
+	_update_hud_layout()
+
 	if GameManager.selected_mode == GameManager.Mode.ONLINE:
 		_setup_online()
 	else:
 		_setup_local()
+
+func _update_hud_layout() -> void:
+	var vp_size := get_viewport_rect().size
+	bottom_bar.global_position = Vector2(0, vp_size.y - 100)
+	bottom_bar.size = Vector2(vp_size.x, 100)
+	hud_entries_box.global_position = Vector2(0, vp_size.y - 100)
+	hud_entries_box.size = Vector2(vp_size.x, 100)
 
 func _physics_process(_delta: float) -> void:
 	if GameManager.selected_mode == GameManager.Mode.ONLINE and local_player != null and is_instance_valid(local_player):
@@ -44,16 +54,28 @@ func _process(_delta: float) -> void:
 
 func _setup_local() -> void:
 	var fighters: Array = []
-	fighters.append(_spawn_player(_spawn_pos(0), "p1_", false, GameManager.player1_character))
+	
+	# 1. Resolve Player 1
+	var p1_char: int = GameManager.player1_character
+	if p1_char < 0 or p1_char >= GameManager.characters.size():
+		p1_char = randi_range(0, GameManager.characters.size() - 1)
+		
+	fighters.append(_spawn_player(_spawn_pos(0), "p1_", false, p1_char))
 
+	# 2. Resolve CPUs
 	var slot_index := 1
 	for slot in GameManager.cpu_slots:
 		if not slot["enabled"]:
 			continue
 		if slot_index >= SPAWN_NAMES.size():
 			break
+		
+		var cpu_char: int = slot["character"]
+		if cpu_char < 0 or cpu_char >= GameManager.characters.size():
+			cpu_char = randi_range(0, GameManager.characters.size() - 1)
+
 		var prefix := "cpu_%d_" % slot_index
-		fighters.append(_spawn_player(_spawn_pos(slot_index), prefix, true, slot["character"]))
+		fighters.append(_spawn_player(_spawn_pos(slot_index), prefix, true, cpu_char))
 		slot_index += 1
 
 	_link_opponents(fighters)
@@ -63,21 +85,11 @@ func _setup_online() -> void:
 	NetworkManager.message_received.connect(_on_network_message)
 	NetworkManager.peer_left.connect(_on_opponent_left)
 
-	# Both players picked in CharacterSelect.tscn before landing here -
-	# player1_character is always "my own pick", online_opponent_character
-	# is whatever the other player sent over the relay. Host is always P1,
-	# the joining player is always P2.
 	var my_char: int = GameManager.player1_character
 	var opp_char: int = GameManager.online_opponent_character
 	var p1_char: int = my_char if NetworkManager.is_host else opp_char
 	var p2_char: int = opp_char if NetworkManager.is_host else my_char
 
-	# Online players are on separate physical keyboards, so both always
-	# read WASD+F ("p1_") locally - there's no reason to make the joiner
-	# use the P2 arrow-key layout meant for sharing one keyboard. The
-	# remote player's input_prefix is never actually read (see the
-	# is_remote guard in player.gd's _physics_process), so it's harmless
-	# for both spawned nodes to use "p1_" here.
 	var p1 := _spawn_player(_spawn_pos(0), "p1_", false, p1_char)
 	var p2 := _spawn_player(_spawn_pos(1), "p1_", false, p2_char)
 
@@ -87,10 +99,7 @@ func _setup_online() -> void:
 	else:
 		local_player = p2
 		remote_player = p1
-	# The remote player isn't simulated locally at all - it's just a
-	# puppet driven entirely by "state" messages from the other machine
-	# (see SmashPlayer.apply_remote_state and the is_remote guard in
-	# player.gd's _physics_process).
+
 	remote_player.is_remote = true
 
 	_link_opponents([p1, p2])
@@ -111,10 +120,10 @@ func _on_network_message(data: Dictionary) -> void:
 
 func _on_opponent_left() -> void:
 	if remote_player != null and is_instance_valid(remote_player):
-		remote_player.is_remote = false # stop waiting on packets that won't arrive
+		remote_player.is_remote = false
 
 func _spawn_pos(index: int) -> Vector2:
-	return stage.get_node(SPAWN_NAMES[index]).position
+	return stage.get_node(SPAWN_NAMES[index]).global_position
 
 func _link_opponents(fighters: Array) -> void:
 	for f in fighters:
@@ -127,16 +136,21 @@ func _spawn_player(pos: Vector2, prefix: String, is_cpu: bool, char_index: int) 
 	p.input_prefix = prefix
 	p.is_cpu = is_cpu
 	p.stats = GameManager.characters[char_index]
-	p.global_position = pos
+	
 	players_root.add_child(p)
+	p.global_position = pos
+	
 	return p
 
 func _build_hud(fighters: Array) -> void:
+	for child in hud_entries_box.get_children():
+		child.queue_free()
+
 	for f in fighters:
 		var color: Color = f.stats.get("color", Color.WHITE)
 
 		var vbox := VBoxContainer.new()
-		vbox.custom_minimum_size = Vector2(120, 0)
+		vbox.custom_minimum_size = Vector2(140, 90)
 		vbox.alignment = BoxContainer.ALIGNMENT_CENTER
 
 		var name_label := Label.new()
@@ -147,13 +161,14 @@ func _build_hud(fighters: Array) -> void:
 
 		var percent_label := Label.new()
 		percent_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		percent_label.add_theme_font_size_override("font_size", 30)
+		percent_label.add_theme_font_size_override("font_size", 24)
 		percent_label.text = "0%"
 		vbox.add_child(percent_label)
 
 		var stocks_box := HBoxContainer.new()
 		stocks_box.alignment = BoxContainer.ALIGNMENT_CENTER
-		stocks_box.add_theme_constant_override("separation", 4)
+		stocks_box.add_theme_constant_override("separation", 6)
+		stocks_box.custom_minimum_size = Vector2(0, 20)
 		vbox.add_child(stocks_box)
 
 		hud_entries_box.add_child(vbox)

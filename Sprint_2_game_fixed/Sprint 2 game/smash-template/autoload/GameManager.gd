@@ -88,21 +88,5 @@ var characters: Array = [
 			"up":      {"damage": 9.0, "kb_base": 130.0, "kb_scale": 6.0, "range": 24.0, "startup": 0.05, "active": 0.08, "cooldown": 0.3, "hits": 1, "angle": 85.0},
 			"down":    {"damage": 6.0, "kb_base": 90.0, "kb_scale": 4.5, "range": 22.0, "startup": 0.04, "active": 0.1, "cooldown": 0.3, "hits": 1, "angle": 15.0},
 			"back":    {"damage": 4.0, "kb_base": 70.0, "kb_scale": 4.0, "range": 24.0, "startup": 0.03, "active": 0.12, "cooldown": 0.3, "hits": 1, "angle": 30.0},
-		},
-	}, # Added missing closing bracket here
-	{
-		"name": "Guy black",
-		"color": Color(0.0, 0.0, 0.0),
-		"speed": 380.0,
-		"jump_velocity": -640.0,
-		"gravity_scale": 0.7,
-		"extra_jumps": 2,
-		"weight": 0.8,
-		"attacks": {
-			"neutral": {"damage": 3.0, "kb_base": 50.0, "kb_scale": 4.0, "range": 26.0, "startup": 0.04, "active": 0.3, "cooldown": 0.35, "hits": 3, "angle": 35.0},
-			"up":      {"damage": 9.0, "kb_base": 130.0, "kb_scale": 6.0, "range": 24.0, "startup": 0.05, "active": 0.08, "cooldown": 0.3, "hits": 1, "angle": 85.0},
-			"down":    {"damage": 6.0, "kb_base": 90.0, "kb_scale": 4.5, "range": 22.0, "startup": 0.04, "active": 0.1, "cooldown": 0.3, "hits": 1, "angle": 15.0},
-			"back":    {"damage": 4.0, "kb_base": 70.0, "kb_scale": 4.0, "range": 24.0, "startup": 0.03, "active": 0.12, "cooldown": 0.3, "hits": 1, "angle": 30.0},
-		},
 	},
-]
+	}		]
