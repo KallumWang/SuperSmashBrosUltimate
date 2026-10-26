@@ -1,0 +1,425 @@
+extends CharacterBody2D
+class_name SmashPlayer
+
+## One fighter - the human players, the CPUs, and the network puppet in
+## online mode are ALL this same script (game.gd's _spawn_player() creates
+## every one from Player.tscn). What makes them different is just the
+## @export vars below: is_cpu swaps the input for _cpu_think(), is_remote
+## turns the whole thing into a puppet, and stats decides how they play.
+##
+## Four attack directions:
+# tap attack for neutral,
+# hold jump + attack for up,
+#hold down + attack for down, #
+#or reverse direction right as you ## press attack for a "back" pivot strike behind you. A small flash shap
+# (^ that last line got cut off - it's the AttackFX Polygon2D in Player.tscn:
+# a small flash shape that appears right where the hitbox is, so you can see
+# which direction the swing went. Set up in _do_attack().)
+
+# Gravity in pixels/second^2. Each character multiplies this by their own
+# "gravity_scale" stat (see _physics_process) - Yellow's 0.7 is why they're floaty.
+const GRAVITY := 1400.0
+# Used for BOTH speeding up and slowing down horizontally (it's the
+# move_toward step in _physics_process), so raising it makes everyone
+# snappier at starting AND stopping, not just stopping.
+const FRICTION := 1400.0
+# The three blast lines, in world coordinates - go past one and you lose a
+# stock (checked at the bottom of _physics_process). Remember Godot's y
+# axis points DOWN, which is why the top one is a negative number. For scale:
+# the Stage's platform is at y=200 and spans x=-350..350 (see Stage.tscn).
+const BLAST_TOP_Y := -650.0
+const BLAST_BOTTOM_Y := 1000.0
+const BLAST_SIDE_X := 1400.0
+# Chance (0.0 to 1.0) that dying off the TOP blast line triggers the "Screen
+# KO" splat from autoload/ScreenFX.gd. Used in _on_ko().
+const SCREEN_SPLAT_CHANCE := 0.35
+# What a move falls back to if the character's stats are missing it (or
+# missing a number inside it) - same values as CharacterRoster.BASE_MOVE.
+# Every .get("something", default) in this script is the same idea.
+const DEFAULT_ATTACK := {
+	"damage": 12.0, "kb_base": 150.0, "kb_scale": 6.0, "range": 30.0,
+	"startup": 0.06, "active": 0.12, "cooldown": 0.4, "hits": 1, "angle": 35.0,
+}
+
+# Prefix for the input actions this fighter reads: "p1_" means it listens to
+# p1_left / p1_right / p1_jump / p1_down / p1_attack, which are registered
+# in autoload/InputSetup.gd. CPUs get "cpu_1_" etc. from game.gd but never
+# actually read it - they take the is_cpu branch instead.
+@export var input_prefix: String = "p1_"
+@export var is_cpu: bool = false
+@export var is_remote: bool = false # true only for the network opponent's puppet in online mode
+# This fighter's entry from GameManager.characters (built in
+# scripts/character_roster.gd). game.gd's _spawn_player() assigns it BEFORE
+# add_child(), which is why _ready() below can already read it.
+@export var stats: Dictionary = {}
+@export var stocks: int = 3
+
+# Smash-style damage: starts at 0 and only goes up, and the higher it is
+# the farther each hit launches you (see take_hit).
+var damage_percent: float = 0.0
+var jumps_left: int = 1
+var max_jumps: int = 1 # 1 ground jump + the character's "extra_jumps" stat - set in _ready()
+var facing: int = 1 # 1 = facing right, -1 = facing left
+var is_attacking: bool = false # true from the start of a swing until it fully ends - blocks starting another swing
+var attack_cooldown: float = 0.0 # counts down in _physics_process; can't attack again until it hits 0
+var opponents: Array = [] # filled in by game.gd's _link_opponents() - the CPU looks at this to pick a target
+var current_attack: Dictionary = DEFAULT_ATTACK # the move being swung right now - the hitbox callback reads damage/knockback from here
+var current_strike_dir: int = 1 # which way the CURRENT swing is pointing (differs from facing for "back")
+
+# Emitted from _on_ko() every time this fighter loses a stock. Nothing is
+# connected to it right now (game.gd's HUD just polls damage_percent/stocks
+# every frame in _process instead) but it's there if you want a "player
+# died" hook later.
+signal ko(player)
+
+# These four are child nodes made in scenes/Player.tscn - the names in the
+# $Paths have to match the node names in that scene exactly.
+@onready var sprite: AnimatedSprite2D = $Sprite
+@onready var attack_fx: Polygon2D = $AttackFX
+@onready var hitbox: Area2D = $Hitbox
+@onready var damage_label: Label = $DamageLabel
+
+func _ready() -> void:
+	var color: Color = stats.get("color", Color.WHITE)
+	# Sprite: if the character has a "frames" path in character_roster.gd,
+	# use that hand-made SpriteFrames (needs animations named idle, run,
+	# jump, attack, hurt). Otherwise generate the colored placeholder guy
+	# in code (scripts/sprite_gen.gd). face_color is white for very dark
+	# characters so their face doesn't vanish.
+	var frames_path: String = stats.get("frames", "")
+	if frames_path != "" and ResourceLoader.exists(frames_path):
+		sprite.sprite_frames = load(frames_path)
+	else:
+		sprite.sprite_frames = SpriteGen.build(color, stats.get("face_color", Color.BLACK))
+	sprite.play("idle")
+	# max_jumps counts the first jump too, so extra_jumps 1 = double jump,
+	# Yellow's extra_jumps 2 = triple jump.
+	max_jumps = 1 + int(stats.get("extra_jumps", 1))
+	jumps_left = max_jumps
+	# The hitbox stays switched off except during the "active" part of a
+	# swing (see _do_attack) - otherwise it would hit anyone standing in it.
+	hitbox.monitoring = false
+	hitbox.body_entered.connect(_on_hitbox_body_entered)
+	_update_label()
+
+func _physics_process(delta: float) -> void:
+	if is_remote:
+		# This is just a puppet of the other player's real character - its
+		# actual state arrives via apply_remote_state() (see game.gd's
+		# _on_network_message), not local simulation. Still update its
+		# animation so it visually reflects whatever state just arrived.
+		_update_animation()
+		return
+
+	if attack_cooldown > 0.0:
+		attack_cooldown -= delta
+
+	# Gravity only while airborne; touching the floor refills jumps. (is_on_floor()
+	# reports what happened during LAST frame's move_and_slide() below.)
+	var gravity_scale: float = stats.get("gravity_scale", 1.0)
+	if not is_on_floor():
+		velocity.y += GRAVITY * gravity_scale * delta
+	else:
+		jumps_left = max_jumps
+
+	# --- Step 1: figure out what this fighter wants to do this frame ---
+	# Both humans and CPUs fill in these same 4 variables, and everything
+	# after this block doesn't care which one produced them.
+	var direction := 0.0 # -1 = left, 0 = nothing, 1 = right
+	var jump_pressed := false
+	var attack_pressed := false
+	var variant := "neutral" # which of the 4 moves in stats["attacks"] to use
+	var old_facing := facing # remembered BEFORE we update facing below - that's how "back" can tell you just turned around
+
+	if is_cpu:
+		# _cpu_think() returns [direction, jump_pressed, attack_pressed, variant]
+		var cpu_result := _cpu_think()
+		direction = cpu_result[0]
+		jump_pressed = cpu_result[1]
+		attack_pressed = cpu_result[2]
+		variant = cpu_result[3]
+	else:
+		direction = Input.get_axis(input_prefix + "left", input_prefix + "right")
+		# "just_pressed" = only the frame the key goes down (one jump per tap)...
+		jump_pressed = Input.is_action_just_pressed(input_prefix + "jump")
+		attack_pressed = Input.is_action_just_pressed(input_prefix + "attack")
+		# ...but is_action_pressed below is "is it held right now", which is
+		# how hold-jump + attack = up attack works. The order of this
+		# if/elif is a priority list: down beats up, and both beat back.
+		if Input.is_action_pressed(input_prefix + "down"):
+			variant = "down"
+		elif Input.is_action_pressed(input_prefix + "jump"):
+			variant = "up"
+		elif direction != 0.0 and int(sign(direction)) != old_facing:
+			# This one should act as a pivot attack or backstrike 🙏🙏🙏✌️✌️
+			# (holding the opposite way of where you're currently facing)
+			variant = "back"
+
+	# --- Step 2: apply it ---
+	var speed: float = stats.get("speed", 300.0)
+	if direction != 0.0:
+		facing = int(sign(direction))
+		sprite.flip_h = facing < 0 # the placeholder sprite faces right by default
+		# Ramp toward full speed instead of snapping to it (FRICTION is the ramp rate)
+		velocity.x = move_toward(velocity.x, direction * speed, FRICTION * delta)
+	else:
+		# No input: ramp back down to a stop
+		velocity.x = move_toward(velocity.x, 0.0, FRICTION * delta)
+
+	# Negative jump_velocity because up is negative y. Works mid-air too as
+	# long as jumps_left > 0 - that's the double/triple jump.
+	if jump_pressed and jumps_left > 0:
+		velocity.y = stats.get("jump_velocity", -600.0)
+		jumps_left -= 1
+
+	# Can't start a swing while the cooldown is running OR while the previous
+	# swing is still playing out. _do_attack() is async (it awaits timers),
+	# so this call returns right away and the swing finishes in the background.
+	if attack_pressed and attack_cooldown <= 0.0 and not is_attacking:
+		_do_attack(variant)
+
+	# move_and_slide() actually moves the body using `velocity` and handles
+	# bumping into the stage. Fighters are on collision layer 2 and only
+	# mask layer 1 (the stage - see Player.tscn), so they walk through each other.
+	move_and_slide()
+	_update_animation()
+
+	# Blast line checks. Top blast is separate so it can trigger the Screen KO splat.
+	if global_position.y < BLAST_TOP_Y:
+		_on_ko(true)
+	elif global_position.y > BLAST_BOTTOM_Y or absf(global_position.x) > BLAST_SIDE_X:
+		_on_ko(false)
+
+# Picks idle / jump / run from what the body is doing right now. Skipped
+# entirely mid-swing so the "attack" animation that _do_attack() started
+# isn't overwritten the next frame. (Also runs for online puppets, since
+# their velocity/floor state comes from apply_remote_state().)
+func _update_animation() -> void:
+	if is_attacking:
+		return
+	var anim := "idle"
+	if not is_on_floor():
+		anim = "jump"
+	elif absf(velocity.x) > 20.0: # small threshold so tiny leftover drift still reads as standing
+		anim = "run"
+	if sprite.animation != anim: # only call play() on a change, otherwise it restarts the animation every frame
+		sprite.play(anim)
+
+# Runs one whole swing: startup delay -> position the hitbox -> hitbox is
+# live for "active" seconds -> done. The three awaits are what pause it
+# between those stages without freezing the rest of the game.
+# `variant` is "neutral" / "up" / "down" / "back" - a key in stats["attacks"].
+func _do_attack(variant: String = "neutral") -> void:
+	is_attacking = true
+	var attacks: Dictionary = stats.get("attacks", {})
+	# Fallback chain: the requested move -> the neutral move -> DEFAULT_ATTACK
+	var atk: Dictionary = attacks.get(variant, attacks.get("neutral", DEFAULT_ATTACK))
+	current_attack = atk # so _on_hitbox_body_entered knows what damage/knockback to use
+	var hits: int = int(atk.get("hits", 1))
+	attack_cooldown = atk.get("cooldown", 0.4)
+
+	if sprite.sprite_frames.has_animation("attack"):
+		sprite.play("attack")
+
+	# "startup" = the wind-up before the hit can land. Longer startup = easier to dodge.
+	await get_tree().create_timer(atk.get("startup", 0.06)).timeout
+
+	var range_val: float = atk.get("range", 30.0)
+	current_strike_dir = facing
+
+	# Place the invisible Hitbox and the visible AttackFX flash. The player's
+	# origin is at their FEET and the body is about 64px tall, so y = -32 is
+	# roughly chest height, and -60 is above the head. x is multiplied by
+	# `facing` so the hit appears on the side you're looking at.
+	match variant:
+		"up":
+			hitbox.position = Vector2(range_val * 0.6 * facing, -60)
+			attack_fx.position = Vector2(range_val * 0.3 * facing, -66)
+			attack_fx.rotation = deg_to_rad(-90.0) # point the flash straight up
+		"down":
+			hitbox.position = Vector2(range_val * facing, -8) # low, near the feet
+			attack_fx.position = Vector2(range_val * 0.6 * facing, -4)
+			attack_fx.rotation = deg_to_rad(90.0)
+		"back":
+			# Strikes the OPPOSITE way from `facing`. Since you just turned
+			# to face the new direction, this is what hits whoever is behind you.
+			current_strike_dir = -facing
+			hitbox.position = Vector2(range_val * current_strike_dir, -32)
+			attack_fx.position = Vector2(range_val * current_strike_dir * 0.7, -32)
+			attack_fx.rotation = 0.0 if current_strike_dir > 0 else PI
+		_: # "neutral" (and anything unrecognized)
+			hitbox.position = Vector2(range_val * facing, -32)
+			attack_fx.position = Vector2(range_val * 0.7 * facing, -32)
+			attack_fx.rotation = 0.0 if facing > 0 else PI
+
+	attack_fx.color = stats.get("color", Color.WHITE).lightened(0.4)
+	attack_fx.visible = true
+
+	# For multi-hit moves (Yellow's neutral has hits = 3), the "active" time
+	# is split evenly between the hits, and the hitbox is switched off and
+	# back on between each one - that re-trigger is what lets the same
+	# opponent get hit again, because body_entered only fires when something
+	# ENTERS the area. The extra 0.03s gap between hits is on top of "active".
+	for h in hits:
+		hitbox.monitoring = true
+		await get_tree().create_timer(atk.get("active", 0.12) / hits).timeout
+		hitbox.monitoring = false
+		if h < hits - 1:
+			await get_tree().create_timer(0.03).timeout
+
+	attack_fx.visible = false
+	is_attacking = false
+
+# Fires whenever a body overlaps the Hitbox while hitbox.monitoring is on.
+# The hitbox's collision mask is 2 (fighters only, see Player.tscn), so this
+# only ever sees other fighters - but the checks below are still needed
+# because the hitbox also overlaps its own owner.
+func _on_hitbox_body_entered(hit_body: Node) -> void:
+	if hit_body == self:
+		return
+	# Anything with a take_hit() function counts as hittable - this is how
+	# the same code would work on a training dummy or something later.
+	if hit_body.has_method("take_hit"):
+		# A multi-hit move's total damage is split across its hits, so a 3-hit
+		# move with damage 3.0 does 1.0 per hit.
+		var hits: int = maxi(int(current_attack.get("hits", 1)), 1)
+		var per_hit_damage: float = current_attack.get("damage", 12.0) / hits
+		var kb_base: float = current_attack.get("kb_base", 150.0)
+		var kb_scale: float = current_attack.get("kb_scale", 6.0)
+		var angle: float = current_attack.get("angle", 35.0)
+		if "is_remote" in hit_body and hit_body.is_remote:
+			# hit_body is just our local puppet of the opponent - the real,
+			# authoritative copy of them lives on their machine. Tell them
+			# about the hit over the relay instead of applying it here;
+			# their own take_hit() call will show up in their next "state"
+			# broadcast back to us.
+			NetworkManager.send({
+				"type": "hit", "damage": per_hit_damage, "from_dir": current_strike_dir,
+				"kb_base": kb_base, "kb_scale": kb_scale, "angle": angle,
+			})
+			# (the other machine receives this in game.gd's _on_network_message "hit" case)
+		else:
+			hit_body.take_hit(per_hit_damage, current_strike_dir, kb_base, kb_scale, angle)
+
+# Called on the fighter that GOT hit (directly from the attacker's
+# _on_hitbox_body_entered in local games, or from game.gd's
+# _on_network_message in online games).
+# dmg - percent to add; from_dir - 1 sends them right, -1 sends them left;
+# the rest are the attacker's kb_base / kb_scale / angle numbers.
+func take_hit(dmg: float, from_dir: int, kb_base: float = 150.0, kb_scale: float = 6.0, angle_deg: float = 35.0) -> void:
+	damage_percent += dmg # damage goes up FIRST so this very hit already counts toward its own knockback
+	var weight: float = stats.get("weight", 1.0)
+	# The knockback formula (also written out in the README): base push plus
+	# extra per damage%, shrunk by 100x to get a multiplier, then divided by
+	# weight - so heavier characters (weight > 1) fly less far, lighter ones
+	# (like Yellow's 0.8) fly further. maxf() stops a weight of 0 dividing by zero.
+	var kb: float = ((kb_base + damage_percent * kb_scale) * 0.01) / maxf(weight, 0.1)
+	var rad := deg_to_rad(angle_deg)
+	# Split the knockback into sideways/up using the angle: cos = how
+	# horizontal, sin = how vertical (minus because up is negative y).
+	# This REPLACES velocity instead of adding to it, and there's no hitstun -
+	# you can steer and attack again right away (the README's "extending it
+	# further" list mentions hitstun as a future idea).
+	velocity.x = from_dir * kb * 100.0 * cos(rad)
+	velocity.y = -kb * 100.0 * sin(rad)
+	_update_label()
+	if sprite.sprite_frames.has_animation("hurt"):
+		sprite.play("hurt")
+
+# Refreshes the little "12%" text floating above the fighter's head (the
+# DamageLabel node in Player.tscn). The `if damage_label:` guard is there
+# because take_hit() could in theory run before the node tree is ready.
+func _update_label() -> void:
+	if damage_label:
+		damage_label.text = "%d%%" % int(damage_percent)
+
+# Called from _physics_process when you cross a blast line.
+# top_blast is true only for the top line - that's the only one that can
+# do the Screen KO splat.
+func _on_ko(top_blast: bool = false) -> void:
+	stocks -= 1
+	damage_percent = 0.0
+	_update_label()
+	if top_blast and randf() < SCREEN_SPLAT_CHANCE:
+		ScreenFX.show_splat(stats.get("color", Color.WHITE))
+	ko.emit(self)
+	if stocks <= 0:
+		# Out of stocks: remove this fighter. game.gd's HUD notices the node
+		# is gone (is_instance_valid fails) and switches their entry to "KO".
+		queue_free()
+	else:
+		# Respawn above the middle of the stage (the platform is at y=200,
+		# so -200 drops them onto it) with no leftover momentum.
+		global_position = Vector2(0, -200)
+		velocity = Vector2.ZERO
+
+# The CPU's whole brain. Deliberately dumb: it fakes the same inputs a human
+# would give and returns them as [direction, jump_pressed, attack_pressed, variant]
+# - the exact 4 values _physics_process asks for in step 1.
+func _cpu_think() -> Array:
+	var direction := 0.0
+	var jump_pressed := false
+	var attack_pressed := false
+	var variant := "neutral"
+	var target: SmashPlayer = _nearest_opponent()
+	if target != null:
+		var to_opp: Vector2 = target.global_position - global_position
+		# Walk toward them, but stop once within 30px horizontally so it
+		# doesn't jitter back and forth over their head.
+		if absf(to_opp.x) > 30.0:
+			direction = sign(to_opp.x)
+		# If they're well above us (negative y), jump with a 5%-per-frame
+		# chance - the randomness stops it from jumping at the exact same
+		# instant every time and keeps it from wasting all its jumps at once.
+		if to_opp.y < -80.0 and jumps_left > 0 and randf() < 0.05:
+			jump_pressed = true
+		# Swing as soon as they're within 60px sideways and our cooldown is
+		# ready. Up attack if they're above, down attack if they're below
+		# AND we're airborne (a down attack on the ground would just whiff
+		# at their feet). The CPU never picks "back" - see the README.
+		if absf(to_opp.x) < 60.0 and attack_cooldown <= 0.0:
+			attack_pressed = true
+			if to_opp.y < -50.0:
+				variant = "up"
+			elif to_opp.y > 50.0 and not is_on_floor():
+				variant = "down"
+	# Edge safety: this overrides the chase above so the CPU turns around
+	# before running off the platform (which spans x = -350..350 in Stage.tscn).
+	if global_position.x < -320.0:
+		direction = 1.0
+	elif global_position.x > 320.0:
+		direction = -1.0
+	return [direction, jump_pressed, attack_pressed, variant]
+
+# Finds the closest living fighter in `opponents` by straight-line distance.
+# Returns null if there are none left (everyone else already got freed).
+func _nearest_opponent() -> SmashPlayer:
+	var nearest: SmashPlayer = null
+	var best_dist := INF
+	for o in opponents:
+		# A knocked-out opponent was queue_free()'d, so the array can hold
+		# dead references - is_instance_valid() filters those out.
+		if o == null or not is_instance_valid(o):
+			continue
+		var d: float = global_position.distance_to(o.global_position)
+		if d < best_dist:
+			best_dist = d
+			nearest = o
+	return nearest
+
+## Called by game.gd (_on_network_message) whenever a "state" packet
+## arrives from the other player over the relay. Just applies it directly -
+## this player is is_remote, so nothing else is driving its transform.
+func apply_remote_state(data: Dictionary) -> void:
+	global_position = Vector2(data.get("x", global_position.x), data.get("y", global_position.y))
+	velocity = Vector2(data.get("vx", 0.0), data.get("vy", 0.0))
+	damage_percent = data.get("dmg", damage_percent)
+	stocks = int(data.get("stocks", stocks))
+	facing = int(data.get("facing", facing))
+	sprite.flip_h = facing < 0
+	_update_label()
+	if stocks <= 0:
+		# The real fighter (on the other machine) already ran its own
+		# _on_ko() and freed itself - mirror that here so our HUD shows
+		# "KO" instead of a stale 0% entry that never goes away.
+		queue_free()

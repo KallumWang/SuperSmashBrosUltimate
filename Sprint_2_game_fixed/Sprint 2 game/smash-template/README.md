@@ -15,14 +15,15 @@ project.godot
 icon.svg
 autoload/
   InputSetup.gd        registers p1_/p2_ input actions in code
-  GameManager.gd        selected mode, YOUR character, CPU slots, all character stats/movesets
-  NetworkManager.gd     ENet host/join wrapper
+  GameManager.gd        selected mode, YOUR character, CPU slots, the finished characters array
+  NetworkManager.gd     WebSocket relay client (room codes, send/receive)
 scripts/
   start_screen.gd
   mode_select.gd
   character_select.gd
   cpu_setup.gd          toggle up to 3 CPU opponents on/off, pick their color
   online_lobby.gd
+  character_roster.gd   THE place to add/edit characters (stats, movesets, colors)
   sprite_gen.gd          builds placeholder sprite animations in code
   player.gd              fighter controller: movement/attacks/CPU/sync
   game.gd                spawns fighters onto the stage, builds/updates the HUD
@@ -50,25 +51,68 @@ working unchanged.
 
 ## Attacks & how to make a different character
 
-There's no special-cased "Pikachu code" - every character is just a
-dictionary in `GameManager.characters`, with **four** moves:
+Every character is just data - there's no special-cased "Pikachu code".
+All of it lives in `scripts/character_roster.gd`, in the `_definitions()`
+list. `GameManager.characters` is built from that list once at startup, and
+Character Select, CPU Opponents, the HUD and the match spawner all read the
+finished array - so **adding a character means editing that one list and
+nothing else.**
+
+### Adding a character (the fast way)
+
+Only write what's *different*. Anything you leave out is inherited:
 
 ```gdscript
 {
-    "name": "Guy Yellow",
-    "color": Color(0.95, 0.8, 0.15),
-    "speed": 380.0,            # fast
-    "jump_velocity": -640.0,
-    "gravity_scale": 0.7,      # floaty - falls slower than gravity
-    "extra_jumps": 2,          # triple jump total
-    "weight": 0.8,             # light - flies further when hit
+    "id": "purple",                  # unique, lowercase - used by based_on and GameManager.character_index("purple")
+    "name": "Guy Purple",            # shown on Character Select and the HUD
+    "color": Color(0.6, 0.25, 0.85),
+    "based_on": "red",               # start as a copy of Guy Red (must be defined ABOVE this one)
+    "weight": 1.6,                   # heavier = knocked back less
+    "speed": 230.0,
     "attacks": {
-        "neutral": {"damage": 3.0, "kb_base": 50.0, "kb_scale": 4.0, "range": 26.0, "startup": 0.04, "active": 0.3, "cooldown": 0.35, "hits": 3, "angle": 35.0},
-        "up":      {"damage": 9.0, "kb_base": 130.0, "kb_scale": 6.0, "range": 24.0, "startup": 0.05, "active": 0.08, "cooldown": 0.3, "hits": 1, "angle": 85.0},
-        "down":    {"damage": 6.0, "kb_base": 90.0, "kb_scale": 4.5, "range": 22.0, "startup": 0.04, "active": 0.1, "cooldown": 0.3, "hits": 1, "angle": 15.0},
-        "back":    {"damage": 4.0, "kb_base": 70.0, "kb_scale": 4.0, "range": 24.0, "startup": 0.03, "active": 0.12, "cooldown": 0.3, "hits": 1, "angle": 30.0},
+        "neutral": {"damage": 20.0, "cooldown": 0.8},   # only the fields that change
+        "up":      {"angle": 90.0},
     },
 },
+```
+
+- `based_on` copies every stat and all four moves from an earlier character
+  first, then your overrides are applied on top. Guy Black is just
+  `based_on: "yellow"` with a new color.
+- Without `based_on`, a character starts from `BASE_STATS` / `BASE_MOVE`
+  (middle-of-the-road numbers), so even a 4-line character is playable.
+- `attacks` only needs the moves and fields you want to change.
+- Typos get caught: an unknown key (`"dammage"`), an unknown move
+  (`"nuetral"`), a missing `id`/`name`, a duplicate `id`, a bad `based_on`,
+  or a `weight` of 0 all print a warning/error in Godot's Output panel at
+  startup instead of silently falling back to a default.
+- `face_color` and `ui_color` are picked automatically so very dark
+  characters stay readable (Guy Black gets a white face and a gray HUD
+  name). Set either one yourself in the definition to override it.
+- Optional `"frames": "res://path/to/frames.tres"` gives that one character
+  its own hand-made `SpriteFrames` (animations `idle`, `run`, `jump`,
+  `attack`, `hurt`) instead of the generated colored guy - see "Sprites &
+  animation" above.
+- The order in `_definitions()` is the order on Character Select, and the
+  position in that list is what gets sent over the network in online mode,
+  so both players need the same version of the game.
+- Character Select's grid is 10 columns by at least 3 rows (empty slots fill
+  it out, Random sits in the last slot). It adds rows as the roster grows and
+  shrinks the tiles to fit, up to roughly 50 characters.
+
+### What the stats mean
+
+```gdscript
+"speed", "jump_velocity", "gravity_scale", "extra_jumps"   # movement feel
+"weight"                    # how much knockback they take (lighter flies further)
+"attacks": {
+    "neutral": {...},       # plain attack button
+    "up":      {...},       # hold jump + attack (hitbox above)
+    "down":    {...},       # hold down + attack (hitbox low)
+    "back":    {...},       # pivot strike - reverse direction as you hit attack
+}
+# each move: damage, kb_base, kb_scale, range, startup, active, cooldown, hits, angle
 ```
 
 `player.gd` reads every field at runtime - `gravity_scale`, `speed`,
@@ -95,12 +139,6 @@ white-ish `AttackFX` shape (a `Polygon2D`, tinted your character's color)
 right where the hitbox actually is - out front for neutral, overhead for
 up, low for down, or behind you for a pivot strike - so the direction is
 visually obvious, not just implied by the little face dot flipping.
-
-**To add a new character:** copy one of the four dictionaries in
-`GameManager.characters`, tweak the numbers - it automatically shows up
-in Character Select and the CPU Opponents color-cycle button. Give it all
-four attack variants, or it'll fall back to `neutral`'s stats (or the
-built-in `DEFAULT_ATTACK`) for anything missing.
 
 Damage/knockback math: each hit adds `damage / hits` to `damage_percent`;
 knockback speed is `(kb_base + damage_percent * kb_scale) * 0.01 /
@@ -149,13 +187,21 @@ dot-drawing in `_set_stock_count()` and the label styling in `_build_hud()`.
 ## Toggling multiple CPUs
 
 `GameManager.cpu_slots` is an array of up to 3
-`{"enabled": bool, "character": int}` entries. The **CPU Opponents**
-screen (`CpuSetup.tscn`/`cpu_setup.gd`) renders one row per slot with an
-ON/OFF toggle and a color swatch you click to cycle characters. `game.gd`
-then spawns you (always P1) plus one CPU per enabled slot, at the stage's
-`SpawnP2`/`SpawnP3`/`SpawnP4` markers, and wires every fighter's
-`opponents` list to "everyone else" so CPUs target whichever opponent is
-nearest (`_nearest_opponent()` in `player.gd`) - a real free-for-all.
+`{"enabled": bool, "character": int}` entries. Character Select
+(`character_select.gd`) is laid out like Smash: a grid of character tiles on
+top and four colored player panels along the bottom (P1 red = you, P2 blue,
+P3 yellow, P4 green = the three CPU slots). Click a panel to make it
+active, then click a tile to give it that character; the "?" tile is
+Random. Clicking an empty CPU panel (or its ADD CPU button) switches that CPU
+on, and REMOVE switches it off. A CPU set to Random stores
+`GameManager.RANDOM_CHARACTER` (-1) and `game.gd` rolls a real character for
+it each time a match starts; if P1 picks Random it's rolled when you press
+CONFIRM. `game.gd` then spawns you (always P1) plus one CPU per enabled
+slot, at the stage's `SpawnP2`/`SpawnP3`/`SpawnP4` markers, and wires every
+fighter's `opponents` list to "everyone else" so CPUs target whichever
+opponent is nearest (`_nearest_opponent()` in `player.gd`) - a real
+free-for-all. (The old separate CPU Opponents screen,
+`CpuSetup.tscn`/`cpu_setup.gd`, is no longer used.)
 
 Note: this multi-CPU flow is **local only**. Online mode is still capped
 at 2 players (see below) - extending it to more peers means tracking a
@@ -172,11 +218,13 @@ P2" shortcut currently in `game.gd`.
 
 ## Online mode
 
-`NetworkManager.gd` wraps a basic `ENetMultiplayerPeer` host/join - a
-starting point, not production netcode: 2 players only, state synced via
-an unreliable RPC every physics frame (no interpolation/reconciliation),
-direct IP connect only, and character select is skipped (host = color 0,
-joining player = color 1).
+`NetworkManager.gd` connects both players to a small relay server over
+WebSocket (see `relay_server/`) using a 5-letter room code - no port
+forwarding or IP addresses needed. It's a starting point, not production
+netcode: 2 players only, each player's position/damage/stocks are sent
+every physics frame with no interpolation or reconciliation, and hits are
+sent to the other machine, which applies them to its own fighter. Both
+players pick a character on Character Select first (host = P1, joiner = P2).
 
 ## Old-cartoon filter
 
@@ -220,3 +268,9 @@ for a quick before/after look.
 
 Open `project.godot` in Godot 4.6 and run - it boots into the Start
 Screen.
+
+## Specials and the Almanac
+
+- **Specials**: every character in `scripts/character_roster.gd` has four named specials (`special_neutral`, `special_side`, `special_up`, `special_down`). Press the Special key (G for P1, Slash for P2); hold a direction/jump/down for the other three. They glow while winding up and burst out as a star.
+- **Roster**: 29 characters. Add more by copying the template above the `# ADD NEW CHARACTERS HERE` marker; use `based_on` to inherit and only override what's different. Give each a `"bio"` and named specials.
+- **Almanac** (main menu, under START): the CHARACTERS tab shows every fighter's bio, stat bars and full move table; the CONTROLS tab shows keys and how to do each attack. Both read from the roster and InputMap, so they update automatically when you change a character or rebind a key.
