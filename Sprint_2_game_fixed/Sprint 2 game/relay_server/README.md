@@ -1,6 +1,6 @@
 # Smash relay server (Cloudflare Worker)
 
-A tiny relay: two players connect to it over WebSockets using the same
+A tiny relay: up to four players connect to it over WebSockets using the same
 room code, and it forwards messages between them. It has zero knowledge
 of the game - positions, damage, hits, all of that lives in the Godot
 client. This just lets two players find each other without either one
@@ -63,7 +63,7 @@ hosts - a room responds immediately whenever someone connects to it.
   instance per unique name - `env.ROOMS.idFromName(code)` always resolves
   to the *same* instance for the same code, which is exactly the "one
   room per code" behavior we want, with no database needed.
-- Each `RelayRoom` instance just holds up to 2 open WebSocket
+- Each `RelayRoom` instance just holds up to 4 open WebSocket
   connections and forwards messages between them. When a 2nd player
   joins, both get a `{"type":"ready"}` message. If either disconnects,
   the other gets `{"type":"peer_left"}`.

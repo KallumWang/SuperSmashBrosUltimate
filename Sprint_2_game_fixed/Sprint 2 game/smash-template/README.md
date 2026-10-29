@@ -203,10 +203,7 @@ opponent is nearest (`_nearest_opponent()` in `player.gd`) - a real
 free-for-all. (The old separate CPU Opponents screen,
 `CpuSetup.tscn`/`cpu_setup.gd`, is no longer used.)
 
-Note: this multi-CPU flow is **local only**. Online mode is still capped
-at 2 players (see below) - extending it to more peers means tracking a
-real list of connected peer IDs instead of the "host = P1, one client =
-P2" shortcut currently in `game.gd`.
+Note: this multi-CPU flow is **local only**. Online mode has its own 4-player system (see below).
 
 ## Controls
 
@@ -216,15 +213,53 @@ P2" shortcut currently in `game.gd`.
 - **Player 2 (only used in online mode, or if you wire up local 2P):**
   Left/Right move, Up jump, Down for down-attack, Enter attack
 
-## Online mode
+## Online mode (up to 4 players)
 
-`NetworkManager.gd` connects both players to a small relay server over
+`NetworkManager.gd` connects every player to a small relay server over
 WebSocket (see `relay_server/`) using a 5-letter room code - no port
-forwarding or IP addresses needed. It's a starting point, not production
-netcode: 2 players only, each player's position/damage/stocks are sent
-every physics frame with no interpolation or reconciliation, and hits are
-sent to the other machine, which applies them to its own fighter. Both
-players pick a character on Character Select first (host = P1, joiner = P2).
+forwarding or IP addresses needed. The relay gives each player a **slot**
+0-3 (host = slot 0 = P1, then P2, P3, P4 in join order); the slot is also
+the player's panel on Character Select and their spawn marker on the Stage.
+
+Flow: the host presses HOST GAME and shares the code; up to 3 friends JOIN.
+The lobby shows how many players are in, and the host's **START MATCH**
+button (needs 2+ players) locks the room and sends everyone to Character
+Select. Each player confirms a character; once everyone has, the match
+starts. If someone leaves mid-match, only their fighter is removed.
+
+It's a starting point, not production netcode: each player's
+position/damage/stocks are sent every physics frame with no interpolation or
+reconciliation. A hit is sent to the one machine that owns the victim
+("to": their slot), which applies it to its own fighter. **You must
+redeploy the relay** (`wrangler deploy` in `relay_server/`) for 4-player
+rooms to work - the old relay only accepts 2.
+
+## Results screen, rematch and the leaderboard
+
+**Match end.** A match with 2+ fighters ends when only one is left (`game.gd`,
+`_check_match_end`). A results screen shows the winner:
+- **Local:** PLAY AGAIN (same characters; Random CPUs re-roll), CHARACTER SELECT, MAIN MENU.
+- **Online:** PLAY AGAIN is a vote. When every player still in the room has
+  voted, the relay sends `rematch_go` and everyone reloads the match together.
+  LEAVE goes back to the title screen.
+
+**Usernames.** Online play needs an account: the first time you open the
+Online screen, type a username (3-16 letters/numbers/_, must be unique) and
+press REGISTER. The relay creates the account and the game saves the ID and a
+secret token in `user://profile.cfg`. Names show in the lobby, on Character
+Select and on the results screen.
+
+**Leaderboard** (main menu): wins, games played and win % for every
+registered player, sortable. Only **online** matches count. Stats live on the
+relay (a SQLite-backed Durable Object), never in the game, and a match is only
+recorded when every connected player's game reports the **same winner** and at
+least **two different accounts** played - so one person with several windows
+can't farm wins. Win % ranks players with 3+ games first (`*` = not ranked yet).
+
+**Deploying.** Everything server-side is in `relay_server/src/worker.js`. After
+changing it run `npx.cmd wrangler deploy` in `relay_server/`. The leaderboard
+needs the `v2` migration in `wrangler.toml` (already added); the first deploy
+creates it automatically.
 
 ## Old-cartoon filter
 

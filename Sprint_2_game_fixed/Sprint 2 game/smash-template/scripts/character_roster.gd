@@ -4,7 +4,7 @@ extends RefCounted
 ## when you add one - GameManager.characters is built from _wdefinitions()
 ## below (see autoload/GameManager.gd), and Character Select, CPU Setup,
 ## the HUD and the match spawner (game.gd) all read that finished array.
-##rrrrrrrrrrrrtrrrrrrrrrrrrrrrrr
+##dede
 ## Why this exists: before, every character was a ~12 line dictionary
 ## pasted in by hand, and a typo like "dammage" silently fell back to the
 ## default value because player.gd reads everything withrrrrreeffe .get(key, default).
@@ -200,7 +200,7 @@ static func _definitions() -> Array:
 		# a complete example of every number a character can have.
 		{
 			"id": "red",
-			"name": "Guy Red",
+			"name": "Connell",
 			"bio": "Heavy bruiser: slow to start, brutal when it lands.",
 			"color": Color(0.85, 0.2, 0.2),
 			"speed": 290.0,
@@ -242,7 +242,7 @@ static func _definitions() -> Array:
 		},
 		{
 			"id": "green",
-			"name": "Guy Green",
+			"name": "Nick",
 			"bio": "Reach fighter: hits from far away but is slow to react.",
 			"color": Color(0.25, 0.75, 0.3),
 			"speed": 270.0,
@@ -263,7 +263,7 @@ static func _definitions() -> Array:
 		},
 		{
 			"id": "yellow",
-			"name": "Guy Yellow",
+			"name": "Chud",
 			"bio": "Light and floaty. Wins with fast multi-hit combos.",
 			"color": Color(0.95, 0.8, 0.15),
 			"speed": 380.0,
@@ -460,7 +460,7 @@ static func _definitions() -> Array:
 		},
 		{
 			"id": "maroon",
-			"name": "Guy Maroon",
+			"name": "Leo Chuddong",
 			"color": Color(0.5, 0.1, 0.15),
 			"bio": "Hits hard, recovers slowly. Punishable but scary.",
 			"based_on": "red",
@@ -491,7 +491,7 @@ static func _definitions() -> Array:
 		},
 		{
 			"id": "silver",
-			"name": "Guy Silver",
+			"name": "Chud Choi",
 			"color": Color(0.72, 0.75, 0.8),
 			"bio": "Sharp edge, quick feet. A swordfighter's rhythm.",
 			"based_on": "blue",
@@ -519,9 +519,9 @@ static func _definitions() -> Array:
 		},
 		{
 			"id": "mint",
-			"name": "Guy Mint",
+			"name": "Luk3y",
 			"color": Color(0.6, 0.95, 0.75),
-			"bio": "Cool-headed all-rounder. No weaknesses, no tricks.",
+			"bio": "Cool-headed all-rounder. No weaknesses, no tricks *touches you violently*",
 			"based_on": "blue",
 			"attacks": {
 				"special_neutral": {"name": "Fresh Burst", "damage": 14.0, "kb_base": 160.0, "kb_scale": 6.5, "range": 50.0, "startup": 0.18, "active": 0.14, "cooldown": 0.65, "angle": 35.0},
@@ -637,7 +637,7 @@ static func _definitions() -> Array:
 		},
 		{
 			"id": "slate",
-			"name": "Guy Slate",
+			"name": "Me67",
 			"color": Color(0.35, 0.4, 0.5),
 			"bio": "Stone-faced wall. Rarely moves far, never moves back.",
 			"based_on": "red",

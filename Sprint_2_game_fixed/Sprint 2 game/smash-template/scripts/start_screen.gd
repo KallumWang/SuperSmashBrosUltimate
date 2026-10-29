@@ -1,7 +1,7 @@
 extends Control
 ## The title screen (project.godot's run/main_scene). START is connected to
-## _on_start_pressed in StartScreen.tscn; the ALMANAC button below is made in
-## code (so the scene file didn't need editing) and opens the reference book.
+## _on_start_pressed in StartScreen.tscn; the ALMANAC and LEADERBOARD buttons
+## below are made in code (so the scene file didn't need editing).
 
 func _ready() -> void:
 	# Copy the START button's height so the two buttons match, then slot the
@@ -15,6 +15,14 @@ func _ready() -> void:
 	box.add_child(almanac_button)
 	box.move_child(almanac_button, start_button.get_index() + 1) # add_child puts it last, which is already right here - this just makes the order explicit
 
+	# Same idea for the leaderboard, right under ALMANAC.
+	var board_button := Button.new()
+	board_button.text = "LEADERBOARD"
+	board_button.custom_minimum_size = start_button.custom_minimum_size
+	board_button.pressed.connect(_on_leaderboard_pressed)
+	box.add_child(board_button)
+	box.move_child(board_button, almanac_button.get_index() + 1)
+
 func _on_start_pressed() -> void:
 	get_tree().change_scene_to_file("res://scenes/ModeSelect.tscn")
 
@@ -22,3 +30,7 @@ func _on_start_pressed() -> void:
 # returns here.
 func _on_almanac_pressed() -> void:
 	get_tree().change_scene_to_file("res://scenes/Almanac.tscn")
+
+# Global wins/games table (scripts/leaderboard.gd). Its BACK button returns here.
+func _on_leaderboard_pressed() -> void:
+	get_tree().change_scene_to_file("res://scenes/Leaderboard.tscn")

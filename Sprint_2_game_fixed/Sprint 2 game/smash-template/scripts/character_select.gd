@@ -5,12 +5,14 @@ extends Control
 # the in-match controls. Both online players use the p1_ layout from
 # InputSetup.gd, see game.gd's _setup_online().)
 ##
-## Smash-style layout: a grid odefeeeeeef character tiles on top and a row of four
+## Smash-style layout: a grid of character tiles on top and a row of four
 ## colored player panels (P1 red, P2 blue, P3 yellow, P4 green) along the
 ## bottom. P1 is you. P2-P4 are the three CPU slots from
-## GameManager.cpu_slots (local mode) - or just "P2 = the other player" in
-## online mode.
-##rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr
+## GameManager.cpu_slots (local mode). In online mode the four panels are the
+## four relay slots instead: panel N = player N (your own panel is the one you
+## edit; the others show "Choosing..." / "Ready!" and stay hidden until the
+## match starts; empty slots show "Waiting for player").
+##
 ## How to use it:
 ##   1. Click a panel to make it the ACTIVE one (white border). Clicking an
 ##      empty CPU panel adds that CPU; its REMOVE button turns it off again.
@@ -42,7 +44,7 @@ const OFF_COLOR := Color(0.25, 0.25, 0.28) # a CPU panel that's switched off
 const RANDOM_COLOR := Color(0.45, 0.45, 0.5) # the "?" tile and a Random pick
 
 # Node paths into CharacterSelect.tscn - these have to match the scene tree.
-# grid is the GridContainer the cfharacter tiles get added to, cursor is the
+# grid is the GridContainer the character tiles get added to, cursor is the
 # yellow outline box that sits around the tile the ACTIVE panel has picked,
 # preview_panel is the old big preview box on the right (hidden now - the
 # bottom panels replaced it), and cpu_hint is the line of text in the middle
@@ -66,22 +68,33 @@ var active_panel: int = 0
 var _p1_choice: int = 0
 
 # Online-only state. _confirmed locks the screen after you hit CONFIRM so you
-# can't change your pick; _my_pick / _opponent_pick start at -1 meaning "not
-# chosen yet", and the match only starts once both are filled in
-# (see _maybe_start_match).
+# can't change your pick. The match only starts once everyone in the room has
+# an entry in _picks below (see _maybe_start_match).
 var _is_online: bool = false
 var _confirmed: bool = false
-var _my_pick: int = -1
-var _opponent_pick: int = -1
+# Online: relay slot -> character index, for every player who has confirmed
+# (including us once we confirm). The match starts when every slot that is
+# in the room has an entry - see _maybe_start_match.
+var _picks: Dictionary = {}
 
 func _ready() -> void:
 	_is_online = GameManager.selected_mode == GameManager.Mode.ONLINE
+	# Coming back after a match: start on the character you just played.
+	_p1_choice = clampi(GameManager.player1_character, 0, GameManager.characters.size() - 1)
 	if _is_online:
 		# Listen for the other player's "pick" message and for them leaving.
 		# (NetworkManager is an autoload that survived the scene change from
 		# OnlineLobby, so the connection is still open.)
 		NetworkManager.message_received.connect(_on_message_received)
 		NetworkManager.peer_left.connect(_on_peer_left)
+		NetworkManager.roster_changed.connect(_on_roster_changed)
+		# Online, the panel you edit is the one for YOUR slot (P1 if you
+		# are the host, P2 for the second player to join, and so on).
+		active_panel = maxi(NetworkManager.my_slot, 0)
+		# A faster player may have confirmed before this screen finished
+		# loading - NetworkManager.picks kept those messages for us.
+		for slot in NetworkManager.picks:
+			_picks[slot] = NetworkManager.picks[slot]
 
 	preview_panel.visible = false # the bottom panels do this job now
 	grid.columns = GRID_COLUMNS # overrides the 4 set in the scene
@@ -210,7 +223,7 @@ func _build_panels() -> void:
 	row.add_theme_constant_override("separation", 12)
 	row.custom_minimum_size = Vector2(0, 210)
 
-	var count: int = 2 if _is_online else 4
+	var count: int = 4 # online: one panel per relay slot; local: you + 3 CPUs
 	for i in count:
 		var root := PanelContainer.new()
 		root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -292,20 +305,26 @@ func _make_label(text: String, font_size: int) -> Label:
 # GameManager.RANDOM_CHARACTER (-1) for Random.
 
 func _get_choice(panel_index: int) -> int:
-	if panel_index == 0:
+	if panel_index == _own_panel():
 		return _p1_choice
 	return GameManager.cpu_slots[panel_index - 1]["character"]
 
 func _set_choice(panel_index: int, choice: int) -> void:
-	if panel_index == 0:
+	if panel_index == _own_panel():
 		_p1_choice = choice
 	else:
 		GameManager.cpu_slots[panel_index - 1]["character"] = choice
 
-# Is this panel "in the match"? P1 always is; online P2 (the other player)
-# always is; a CPU panel is whatever its slot's "enabled" says.
+# The panel that holds YOUR pick: panel 0 (P1) locally, your relay slot online.
+func _own_panel() -> int:
+	return maxi(NetworkManager.my_slot, 0) if _is_online else 0
+
+# Is this panel "in the match"? Online: whoever the relay says is in the room.
+# Locally P1 always is; a CPU panel is whatever its slot's "enabled" says.
 func _panel_on(panel_index: int) -> bool:
-	if panel_index == 0 or _is_online:
+	if _is_online:
+		return NetworkManager.slots.has(panel_index)
+	if panel_index == 0:
 		return true
 	return GameManager.cpu_slots[panel_index - 1]["enabled"]
 
@@ -356,7 +375,8 @@ func _refresh() -> void:
 	for i in panels.size():
 		var p: Dictionary = panels[i]
 		var on: bool = _panel_on(i)
-		var choice: int = _get_choice(i) if i == 0 or not _is_online else 0
+		var is_mine: bool = i == _own_panel()
+		var choice: int = _get_choice(i) if (is_mine or not _is_online) else 0
 		var swatch: ColorRect = p["swatch"]
 		var face: ColorRect = p["face"]
 		var question: Label = p["question"]
@@ -367,17 +387,19 @@ func _refresh() -> void:
 
 		face.visible = false
 		question.visible = false
-		if _is_online and i == 1:
-			# The other player: don't reveal their pick before the match,
+		if _is_online and not is_mine and on:
+			# Another player: don't reveal their pick before the match,
 			# just whether they've confirmed yet.
 			swatch.color = RANDOM_COLOR
 			question.visible = true
-			name_label.text = "OPPONENT"
-			info.text = "Ready!" if _opponent_pick != -1 else "Choosing..."
+			# Their username if they have an account, otherwise "PLAYER N".
+			var their_name: String = NetworkManager.names.get(i, "")
+			name_label.text = their_name.to_upper() if their_name != "" else "PLAYER %d" % (i + 1)
+			info.text = "Ready!" if _picks.has(i) else "Choosing..."
 		elif not on:
 			swatch.color = OFF_COLOR
 			name_label.text = "OFF"
-			info.text = "Click to add a CPU"
+			info.text = "Waiting for player" if _is_online else "Click to add a CPU"
 		elif choice == GameManager.RANDOM_CHARACTER:
 			swatch.color = RANDOM_COLOR
 			question.visible = true
@@ -390,8 +412,8 @@ func _refresh() -> void:
 			face.visible = true
 			name_label.text = data["name"].to_upper()
 			info.text = "Player 1" if i == 0 else "CPU %d" % i
-		if _is_online and i == 0:
-			info.text = "You"
+		if _is_online and is_mine:
+			info.text = "You (Ready!)" if _picks.has(i) else "You"
 
 		# Active panel gets a thick white border; the rest a thin dark one.
 		var is_active := (i == active_panel)
@@ -409,7 +431,7 @@ func _refresh() -> void:
 		for old_tag in t.get_meta("tag_row").get_children():
 			old_tag.queue_free()
 	for i in panels.size():
-		if _panel_on(i) and not (_is_online and i == 1):
+		if _panel_on(i) and not (_is_online and i != _own_panel()):
 			var tile_row: HBoxContainer = tiles[_choice_to_tile(_get_choice(i))].get_meta("tag_row")
 			tile_row.add_child(_make_tag(i))
 
@@ -442,34 +464,49 @@ func _on_confirm_pressed() -> void:
 
 	if _is_online:
 		_confirmed = true
-		_my_pick = pick
-		cpu_hint.text = "Waiting for the other player to pick..."
-		# The pick goes over the wire as the INDEX in the roster, so both
+		_picks[NetworkManager.my_slot] = pick
+		cpu_hint.text = "Waiting for the other players to pick..."
+		# The pick goes over the wire as the INDEX in the roster, so all
 		# players need the same roster in the same order (same game version).
 		NetworkManager.send({"type": "pick", "character": pick})
+		_refresh()
 		_maybe_start_match()
 	else:
 		GameManager.selected_mode = GameManager.Mode.LOCAL
 		get_tree().change_scene_to_file("res://scenes/Game.tscn")
 
-# The other player's "pick" message arrives here (their copy of
-# _on_confirm_pressed above sent it).
+# Another player's "pick" message arrives here (their copy of
+# _on_confirm_pressed above sent it). The relay added "from" = their slot.
 func _on_message_received(data: Dictionary) -> void:
 	if data.get("type") == "pick":
-		_opponent_pick = int(data.get("character", 0))
+		_picks[int(data.get("from", -1))] = int(data.get("character", 0))
 		_refresh() # flips their panel to "Ready!"
 		_maybe_start_match()
 
-# Called after EITHER side's pick lands. Does nothing until both picks are in,
-# so it doesn't matter who confirms first.
+# Called after ANY pick lands (or someone leaves). Does nothing until we have
+# confirmed AND every player in the room has, so it doesn't matter who
+# confirms first. Then it hands the picks to game.gd and starts the match.
 func _maybe_start_match() -> void:
-	if _my_pick == -1 or _opponent_pick == -1:
+	if not _confirmed:
 		return
-	GameManager.online_opponent_character = _opponent_pick
+	for slot in NetworkManager.slots:
+		if not _picks.has(slot):
+			return
+	GameManager.online_picks = {}
+	for slot in NetworkManager.slots:
+		GameManager.online_picks[slot] = _picks[slot]
 	get_tree().change_scene_to_file("res://scenes/Game.tscn")
 
-func _on_peer_left() -> void:
-	cpu_hint.text = "The other player disconnected."
+# A player left or joined: panels flip on/off, and if the player we were
+# waiting on just left, the match can start without them.
+func _on_roster_changed() -> void:
+	_refresh()
+	_maybe_start_match()
+
+func _on_peer_left(slot: int) -> void:
+	_picks.erase(slot)
+	cpu_hint.text = "A player disconnected."
+	_refresh()
 
 func _on_back_pressed() -> void:
 	if _is_online:

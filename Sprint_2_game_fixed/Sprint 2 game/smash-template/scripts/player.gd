@@ -32,11 +32,11 @@ const FRICTION := 1400.0
 # axis points DOWN, which is why the top one is a negative number. For scale:
 # the Stage's platform is at y=200 and spans x=-350..350 (see Stage.tscn).
 const BLAST_TOP_Y := -650.0
-const BLAST_BOTTOM_Y := 1300.0 # <--- Lowered from 1000.0 so players fall further before dying
+const BLAST_BOTTOM_Y := 1000.0
 const BLAST_SIDE_X := 1400.0
 # Chance (0.0 to 1.0) that dying off the TOP blast line triggers the "Screen
 # KO" splat from autoload/ScreenFX.gd. Used in _on_ko().
-const SCREEN_SPLAT_CHANCE := 1.0 # <--- Changed to 1.0 so it always plays
+const SCREEN_SPLAT_CHANCE := 0.35
 # What a move falls back to if the character's stats are missing it (or
 # missing a number inside it) - same values as CharacterRoster.BASE_MOVE.
 # Every .get("something", default) in this script is the same idea.
@@ -60,6 +60,7 @@ const SPECIAL_FX_SCALE := 1.7 # how big the star ends up compared to the normal 
 # actually read it - they take the is_cpu branch instead.
 @export var input_prefix: String = "p1_"
 @export var is_cpu: bool = false
+var net_slot: int = -1 # online only: which player (relay slot 0-3) this fighter is - set by game.gd, used to address "hit" messages
 @export var is_remote: bool = false # true only for the network opponent's puppet in online mode
 # This fighter's entry from GameManager.characters (built in
 # scripts/character_roster.gd). game.gd's _spawn_player() assigns it BEFORE
@@ -252,6 +253,13 @@ func _update_animation() -> void:
 # "special_side" / "special_up" / "special_down" - a key in stats["attacks"].
 func _do_attack(variant: String = "neutral") -> void:
 	is_attacking = true
+	# Online: tell the other players we just swung, so THEIR copy of us
+	# (the puppet) plays the same swing - animation, flash, special glow.
+	# (Puppets run this same function from show_remote_attack, which is why
+	# the is_remote check is here: they must not send it back.) The damage
+	# itself is NOT sent this way - see _on_hitbox_body_entered.
+	if net_slot >= 0 and not is_remote:
+		NetworkManager.send({"type": "attack", "variant": variant, "facing": facing})
 	var attacks: Dictionary = stats.get("attacks", {})
 	# Fallback chain: the requested move -> the neutral move -> DEFAULT_ATTACK
 	var atk: Dictionary = attacks.get(variant, attacks.get("neutral", DEFAULT_ATTACK))
@@ -348,8 +356,8 @@ func _do_attack(variant: String = "neutral") -> void:
 # only ever sees other fighters - but the checks below are still needed
 # because the hitbox also overlaps its own owner.
 func _on_hitbox_body_entered(hit_body: Node) -> void:
-	if hit_body == self:
-		return
+	if hit_body == self or is_remote:
+		return # (a puppet's swing is just for show - the real fighter on its own machine decides who it hits)
 	# Anything with a take_hit() function counts as hittable - this is how
 	# the same code would work on a training dummy or something later.
 	if hit_body.has_method("take_hit"):
@@ -367,7 +375,7 @@ func _on_hitbox_body_entered(hit_body: Node) -> void:
 			# their own take_hit() call will show up in their next "state"
 			# broadcast back to us.
 			NetworkManager.send({
-				"type": "hit", "damage": per_hit_damage, "from_dir": current_strike_dir,
+				"type": "hit", "to": hit_body.net_slot, "damage": per_hit_damage, "from_dir": current_strike_dir,
 				"kb_base": kb_base, "kb_scale": kb_scale, "angle": angle,
 			})
 			# (the other machine receives this in game.gd's _on_network_message "hit" case)
@@ -413,8 +421,8 @@ func _on_ko(top_blast: bool = false) -> void:
 	stocks -= 1
 	damage_percent = 0.0
 	_update_label()
-	if top_blast:
-		ScreenFX.show_splat(stats.get("color", Color.WHITE)) # <--- Removed the random check so it always triggers on top KOs
+	if top_blast and randf() < SCREEN_SPLAT_CHANCE:
+		ScreenFX.show_splat(stats.get("color", Color.WHITE))
 	ko.emit(self)
 	if stocks <= 0:
 		# Out of stocks: remove this fighter. game.gd's HUD notices the node
@@ -476,7 +484,7 @@ static func _make_star(outer: float, inner: float, points: int) -> PackedVector2
 	return poly
 
 # Finds the closest living fighter in `opponents` by straight-line distance.
-# Returns null if there are none left (everyone else already got freed)d
+# Returns null if there are none left (everyone else already got freed).
 func _nearest_opponent() -> SmashPlayer:
 	var nearest: SmashPlayer = null
 	var best_dist := INF
@@ -490,6 +498,61 @@ func _nearest_opponent() -> SmashPlayer:
 			best_dist = d
 			nearest = o
 	return nearest
+
+## Smash-style name tag above the head: a coloured plate with the player's
+## name and a little arrow pointing down at the fighter, so you can tell
+## players apart even when everyone picked the same character. Called by
+## game.gd right after the fighter is spawned (text = username online,
+## "P1" / "CPU 2" locally; color = that player's slot colour). The two Labels
+## are made here in code, so Player.tscn didn't need editing. They sit above
+## the damage % label (which spans y = -92 to -66).
+var name_tag: Label
+var name_arrow: Label
+
+func set_tag(text: String, color: Color) -> void:
+	if name_tag == null:
+		name_tag = Label.new()
+		name_tag.add_theme_font_size_override("font_size", 13)
+		name_tag.add_theme_color_override("font_color", Color.WHITE)
+		name_tag.add_theme_color_override("font_outline_color", Color.BLACK)
+		name_tag.add_theme_constant_override("outline_size", 4)
+		name_tag.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		add_child(name_tag)
+		name_arrow = Label.new()
+		name_arrow.text = "▼"
+		name_arrow.add_theme_font_size_override("font_size", 12)
+		name_arrow.add_theme_color_override("font_outline_color", Color.BLACK)
+		name_arrow.add_theme_constant_override("outline_size", 3)
+		name_arrow.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		name_arrow.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		add_child(name_arrow)
+	var plate := StyleBoxFlat.new()
+	plate.bg_color = Color(color, 0.9)
+	plate.set_corner_radius_all(4)
+	plate.content_margin_left = 6
+	plate.content_margin_right = 6
+	plate.content_margin_top = 1
+	plate.content_margin_bottom = 1
+	name_tag.add_theme_stylebox_override("normal", plate)
+	name_tag.text = text
+	var size := name_tag.get_minimum_size() # plate hugs the text...
+	name_tag.size = size
+	name_tag.position = Vector2(-size.x / 2.0, -124.0) # ...and is centred over the head
+	name_arrow.add_theme_color_override("font_color", color)
+	name_arrow.size = Vector2(20, 16)
+	name_arrow.position = Vector2(-10.0, -106.0)
+
+## Called by game.gd when an "attack" message arrives for this puppet: plays
+## the same swing the real fighter just started (wind-up glow, flash, star...)
+## so attacks are visible on every player's screen. Purely visual - the
+## puppet's hitbox is ignored (see the is_remote check in
+## _on_hitbox_body_entered), so it can't double-hit anyone.
+func show_remote_attack(variant: String, new_facing: int) -> void:
+	if not is_remote or is_attacking:
+		return
+	facing = new_facing
+	sprite.flip_h = facing < 0
+	_do_attack(variant)
 
 ## Called by game.gd (_on_network_message) whenever a "state" packet
 ## arrives from the other player over the relay. Just applies it directly -

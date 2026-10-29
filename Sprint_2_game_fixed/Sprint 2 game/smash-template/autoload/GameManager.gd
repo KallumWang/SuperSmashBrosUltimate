@@ -3,7 +3,7 @@ extends Node
 ## who's a CPU, and every character's stats/moveset.
 ## (This is an autoload - registered in project.godot under [autoload] - so
 ## any script can just write GameManager.something without loading it.)
-const RANDOM_CHARACTER := -1
+
 enum Mode { LOCAL, ONLINE }
 
 # Set by mode_select.gd / online_lobby.gd / cpu_setup.gd, read by game.gd's
@@ -15,7 +15,11 @@ var selected_mode: int = Mode.LOCAL
 # out who ends up as P1/P2.
 var player1_character: int = 0
 var is_cpu_p2: bool = false # currently unused - nothing reads it (CPUs are configured through cpu_slots below instead)
-var online_opponent_character: int = 1 # set once the other player picks in online Character Select
+var online_opponent_character: int = 1 # (old 2-player value, no longer read - see online_picks below)
+# Online matches (up to 4 players): slot number -> character index, filled in
+# by character_select.gd once everyone has confirmed. game.gd's
+# _setup_online() spawns one fighter per entry at that slot's spawn marker.
+var online_picks: Dictionary = {}
 
 # Up to 3 local CPU opponents for free-for-alls. Toggle "enabled" and
 # change "character" on the CPU Opponents screen (cpu_setup.gd edits these
@@ -24,6 +28,10 @@ var online_opponent_character: int = 1 # set once the other player picks in onli
 # "character" is an index into the characters array, so it's looked up by
 # id here - that way adding/reordering characters in character_roster.gd
 # can't silently change which character each CPU starts as.
+# "character" can also be RANDOM_CHARACTER (-1) meaning "pick a random
+# character for this CPU" - game.gd's _setup_local() rolls the dice each
+# time a match starts, so "Random" gives a different fighter every match.
+const RANDOM_CHARACTER := -1
 var cpu_slots: Array = [
 	{"enabled": true, "character": 0}, # fixed up in _ready() below - needs "characters" to exist first
 	{"enabled": false, "character": 0},
