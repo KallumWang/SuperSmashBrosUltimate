@@ -473,7 +473,7 @@ func _on_confirm_pressed() -> void:
 		_maybe_start_match()
 	else:
 		GameManager.selected_mode = GameManager.Mode.LOCAL
-		get_tree().change_scene_to_file("res://scenes/Game.tscn")
+		Scenes.go(get_tree(), "res://scenes/Game.tscn")
 
 # Another player's "pick" message arrives here (their copy of
 # _on_confirm_pressed above sent it). The relay added "from" = their slot.
@@ -495,7 +495,7 @@ func _maybe_start_match() -> void:
 	GameManager.online_picks = {}
 	for slot in NetworkManager.slots:
 		GameManager.online_picks[slot] = _picks[slot]
-	get_tree().change_scene_to_file("res://scenes/Game.tscn")
+	Scenes.go(get_tree(), "res://scenes/Game.tscn")
 
 # A player left or joined: panels flip on/off, and if the player we were
 # waiting on just left, the match can start without them.
@@ -511,4 +511,4 @@ func _on_peer_left(slot: int) -> void:
 func _on_back_pressed() -> void:
 	if _is_online:
 		NetworkManager.close_connection() # leave the room so the relay frees it up
-	get_tree().change_scene_to_file("res://scenes/ModeSelect.tscn")
+	Scenes.go(get_tree(), "res://scenes/ModeSelect.tscn")

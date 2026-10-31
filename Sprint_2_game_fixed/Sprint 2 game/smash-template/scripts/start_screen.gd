@@ -23,14 +23,22 @@ func _ready() -> void:
 	box.add_child(board_button)
 	box.move_child(board_button, almanac_button.get_index() + 1)
 
+	# SETTINGS (music volume + key rebinding), under LEADERBOARD.
+	var settings_button := Button.new()
+	settings_button.text = "SETTINGS"
+	settings_button.custom_minimum_size = start_button.custom_minimum_size
+	settings_button.pressed.connect(func(): Scenes.go(get_tree(), "res://scenes/Settings.tscn"))
+	box.add_child(settings_button)
+	box.move_child(settings_button, board_button.get_index() + 1)
+
 func _on_start_pressed() -> void:
-	get_tree().change_scene_to_file("res://scenes/ModeSelect.tscn")
+	Scenes.go(get_tree(), "res://scenes/ModeSelect.tscn")
 
 # Characters + controls reference (scripts/almanac.gd). Its BACK button
 # returns here.
 func _on_almanac_pressed() -> void:
-	get_tree().change_scene_to_file("res://scenes/Almanac.tscn")
+	Scenes.go(get_tree(), "res://scenes/Almanac.tscn")
 
 # Global wins/games table (scripts/leaderboard.gd). Its BACK button returns here.
 func _on_leaderboard_pressed() -> void:
-	get_tree().change_scene_to_file("res://scenes/Leaderboard.tscn")
+	Scenes.go(get_tree(), "res://scenes/Leaderboard.tscn")

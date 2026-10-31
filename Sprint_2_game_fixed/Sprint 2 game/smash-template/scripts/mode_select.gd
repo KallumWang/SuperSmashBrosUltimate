@@ -7,12 +7,12 @@ extends Control
 # network, then pick a character.
 func _on_local_pressed() -> void:
 	GameManager.selected_mode = GameManager.Mode.LOCAL
-	get_tree().change_scene_to_file("res://scenes/CharacterSelect.tscn")
+	Scenes.go(get_tree(), "res://scenes/CharacterSelect.tscn")
 
 # Online: don't set the mode yet - online_lobby.gd sets it to ONLINE only once
 # you actually press Host or Join.
 func _on_online_pressed() -> void:
-	get_tree().change_scene_to_file("res://scenes/OnlineLobby.tscn")
+	Scenes.go(get_tree(), "res://scenes/OnlineLobby.tscn")
 
 func _on_back_pressed() -> void:
-	get_tree().change_scene_to_file("res://scenes/StartScreen.tscn")
+	Scenes.go(get_tree(), "res://scenes/StartScreen.tscn")

@@ -212,6 +212,22 @@ Note: this multi-CPU flow is **local only**. Online mode has its own 4-player sy
   throw a back-attack behind you)
 - **Player 2 (only used in online mode, or if you wire up local 2P):**
   Left/Right move, Up jump, Down for down-attack, Enter attack
+- **Shield (hold Shift; P2: `.`):** blocks every hit, but it shrinks as you
+  hold it and as it takes hits. At zero it **breaks** and you're helpless for
+  2 seconds. While shielding you can't move or attack, but you can tap
+  left/right to **roll**, tap down to **spot dodge** (both briefly
+  invincible), or tap jump to hop out. Everything is tuned by the constants
+  at the top of `scripts/player.gd` (`SHIELD_*`, `ROLL_*`, `SPAWN_SHIELD_TIME`).
+- **Spawn shield:** a bubble in your colour protects you for 3 seconds after
+  you spawn or respawn (it pops early if you attack).
+
+## Match screens
+
+`scripts/match_screens.gd` builds the two big screens in code: the **VS
+intro** (a coloured panel per fighter slides in, then READY? / GO!) and the
+**podium** on the results screen (1st place big and gold, then 2nd-4th,
+ranked by who was knocked out last). `game.gd` keeps the elimination order
+(`_track_eliminations`) and the per-fighter info (`_note_fighter`).
 
 ## Online mode (up to 4 players)
 

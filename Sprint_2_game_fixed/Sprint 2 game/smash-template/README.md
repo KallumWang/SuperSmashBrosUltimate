@@ -212,6 +212,44 @@ Note: this multi-CPU flow is **local only**. Online mode has its own 4-player sy
   throw a back-attack behind you)
 - **Player 2 (only used in online mode, or if you wire up local 2P):**
   Left/Right move, Up jump, Down for down-attack, Enter attack
+- **Shield (hold Shift; P2: `.`):** blocks every hit, but it shrinks as you
+  hold it and as it takes hits. At zero it **breaks** and you're helpless for
+  2 seconds. While shielding you can't move or attack, but you can tap
+  left/right to **roll**, tap down to **spot dodge** (both briefly
+  invincible), or tap jump to hop out. Everything is tuned by the constants
+  at the top of `scripts/player.gd` (`SHIELD_*`, `ROLL_*`, `SPAWN_SHIELD_TIME`).
+- **Spawn shield:** a bubble in your colour protects you for 3 seconds after
+  you spawn or respawn (it pops early if you attack).
+
+- **Taunt (T; P2 `,`):** tap on the ground and the fighter dances (bounce,
+  wiggle, spin) for as long as you hold it; a "★ WOOO! ★" bubble pops up above
+  your stock counter in the bottom bar (never over the fight). Doing anything
+  else, or getting hit, ends it. Everyone online sees the dance and bubble.
+- **Emote wheel (hold E; P2 `M`):** a ring of 8 slots opens, **scroll the mouse
+  wheel** to pick one and **release** the key to send it as a bubble. The
+  slots are empty for now - fill them in `scripts/emotes.gd` (`SLOTS`: `{"text":
+  "GG!", "icon": "res://emotes/gg.png"}`).
+- **Settings** (title screen): music volume + mute, and **rebind every key** for
+  both players (click a key, press the new one; Esc cancels; a key already in
+  use swaps with the other action). Saved in `user://settings.cfg`.
+
+## Music and transitions
+
+`scripts/music.gd` plays one looping track per screen (`audio/menu.ogg`,
+`select.ogg`, `battle.ogg`, `results.ogg`) and fades between them; the tracks
+are original chiptune loops made by `audio/generate_music.py` (edit the chords
+or tempo there and run it to remake them), or drop in your own `.ogg` files
+with the same names. `scripts/scenes.gd` is the fade-to-black used for every
+screen change: call `Scenes.go(get_tree(), "res://scenes/X.tscn")` instead of
+`change_scene_to_file`.
+
+## Match screens
+
+`scripts/match_screens.gd` builds the two big screens in code: the **VS
+intro** (a coloured panel per fighter slides in, then READY? / GO!) and the
+**podium** on the results screen (1st place big and gold, then 2nd-4th,
+ranked by who was knocked out last). `game.gd` keeps the elimination order
+(`_track_eliminations`) and the per-fighter info (`_note_fighter`).
 
 ## Online mode (up to 4 players)
 

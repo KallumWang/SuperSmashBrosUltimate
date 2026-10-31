@@ -78,7 +78,7 @@ func _on_cycle_color(index: int) -> void:
 # local mode) and jump into the match.
 func _on_confirm_pressed() -> void:
 	GameManager.selected_mode = GameManager.Mode.LOCAL
-	get_tree().change_scene_to_file("res://scenes/Game.tscn")
+	Scenes.go(get_tree(), "res://scenes/Game.tscn")
 
 func _on_back_pressed() -> void:
-	get_tree().change_scene_to_file("res://scenes/CharacterSelect.tscn")
+	Scenes.go(get_tree(), "res://scenes/CharacterSelect.tscn")

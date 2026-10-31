@@ -11,5 +11,4 @@ res://scenes/StartScreen.tscn::1cb6799efb543a4d96d4f1ec6dc99a5f::1792982280::res
 res://addons/godot_super-wakatime/api_key_prompt.tscn::a6988a5ba43d5aa92a08f216c1db28db::1792467077::res://.godot/exported/133200997/export-cd8705cb5e2533bd79c64579ac674dae-api_key_prompt.scn
 res://addons/godot_super-wakatime/counter.tscn::7f13ad35960e259f6de719f9785ce249::1792467077::res://.godot/exported/133200997/export-4af6c9115c1c285af5925fa1ce6a526e-counter.scn
 res://scenes/Almanac.tscn::e3049c7a28d3e2fb9cc9c0c3ca2fb6bc::1792982016::res://.godot/exported/133200997/export-3eaddc4e560be65ef2e42c65a94af633-Almanac.scn
-res://smash-template/scenes/Leaderboard.tscn::847a0a3e564a8569a23fecab43a757eb::1793095615::res://.godot/exported/133200997/export-e5d88e9748b76f94e91763e030b7859b-Leaderboard.scn
 res://scenes/Leaderboard.tscn::847a0a3e564a8569a23fecab43a757eb::1793174481::res://.godot/exported/133200997/export-0d6381581c38775917edbdec89bb16e1-Leaderboard.scn

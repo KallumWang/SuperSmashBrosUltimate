@@ -87,7 +87,7 @@ func _ready() -> void:
 	_select_character(0)
 
 func _on_back_pressed() -> void:
-	get_tree().change_scene_to_file("res://scenes/StartScreen.tscn")
+	Scenes.go(get_tree(), "res://scenes/StartScreen.tscn")
 
 # =====================================================================
 # CHARACTERS TAB
@@ -313,6 +313,9 @@ func _build_controls_tab() -> Control:
 		["Down (hold it for down attacks)", _key("p1_down"), _key("p2_down")],
 		["Attack", _key("p1_attack"), _key("p2_attack")],
 		["Special", _key("p1_special"), _key("p2_special")],
+		["Taunt (hold to keep dancing)", _key("p1_taunt"), _key("p2_taunt")],
+		["Emote wheel (hold, scroll the mouse wheel, release)", _key("p1_emote"), _key("p2_emote")],
+		["Shield (hold). While shielding: tap left / right to roll, tap down to spot dodge", _key("p1_shield"), _key("p2_shield")],
 	]
 	for r in key_rows:
 		var action := _cell(r[0], 230, Color.WHITE)

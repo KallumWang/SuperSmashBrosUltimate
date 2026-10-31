@@ -88,7 +88,7 @@ func _ready() -> void:
 	_load()
 
 func _on_back_pressed() -> void:
-	get_tree().change_scene_to_file("res://scenes/StartScreen.tscn")
+	Scenes.go(get_tree(), "res://scenes/StartScreen.tscn")
 
 # Downloads the list. Needs the internet; the status line says what happened.
 func _load() -> void:

@@ -20,6 +20,9 @@ const TAG_COLORS := [
 	Color(0.2, 0.7, 0.25),   # P4 green
 ]
 
+# Pre-/post-match screens (VS intro + podium) - see match_screens.gd.
+const MatchScreens := preload("res://scripts/match_screens.gd")
+
 # Node paths into Game.tscn. players_root is the node every fighter gets
 # added under; hud_entries_box is the HBoxContainer in the bottom bar where
 # _build_hud() adds one column per fighter.
@@ -30,6 +33,12 @@ const TAG_COLORS := [
 # One dictionary per fighter, made by _build_hud() and read every frame by
 # _process() - holds the fighter plus the UI labels/boxes that show their stats.
 var hud_entries: Array = []
+# Same order as hud_entries: what the intro and podium screens need to show
+# for each fighter (slot tag, name, colour, character) - see _note_fighter.
+var _infos: Array = []
+# Indexes (into hud_entries) of fighters in the order they were knocked out -
+# the podium is built from this (last one out = 2nd place, and so on).
+var _elim_order: Array = []
 # Match-end state. The match ends when only one fighter is left (see
 # _check_match_end); a short delay lets the final KO effect play first.
 const END_DELAY := 1.2 # seconds between the last KO and the results screen
@@ -53,6 +62,12 @@ func _ready() -> void:
 		_setup_online()
 	else:
 		_setup_local()
+	# VS intro: freeze everyone, show the panels, then let the fight begin.
+	# (Skipped for solo practice, and when a test sets the "skip_intro" meta.)
+	if hud_entries.size() >= 2 and not GameManager.has_meta("skip_intro"):
+		players_root.process_mode = Node.PROCESS_MODE_DISABLED
+		await MatchScreens.play_intro(self, _infos)
+		players_root.process_mode = Node.PROCESS_MODE_INHERIT
 
 # Runs on a fixed timer (60 times a second by default). In online mode this
 # is how the other player finds out where we are: our position/velocity/
@@ -72,6 +87,8 @@ func _state_message() -> Dictionary:
 		"vx": local_player.velocity.x, "vy": local_player.velocity.y,
 		"dmg": local_player.damage_percent, "stocks": local_player.stocks,
 		"facing": local_player.facing,
+		# visuals for the other players' copy of us: shield bubble size, see-through (dodging), stunned
+		"br": local_player.bubble_r, "gh": local_player.dodge_time > 0.0, "st": local_player.stun_time > 0.0,
 	}
 
 # Our fighter just lost a stock (SmashPlayer's `ko` signal, connected in
@@ -87,6 +104,7 @@ func _on_local_ko(_player: Node) -> void:
 # (instead of the fighter telling the HUD) is why SmashPlayer's `ko` signal
 # has nothing connected to it - this just checks the numbers each frame.
 func _process(delta: float) -> void:
+	_track_eliminations()
 	_check_match_end(delta)
 	for entry in hud_entries:
 		var f = entry["fighter"]
@@ -113,6 +131,14 @@ func _alive_fighters() -> Array:
 		if f != null and is_instance_valid(f) and not f.is_queued_for_deletion() and f.stocks > 0:
 			alive.append(f)
 	return alive
+
+# Notes WHO was knocked out and in what order (for the podium). A knocked-out
+# fighter is freed, so a dead reference = out.
+func _track_eliminations() -> void:
+	for i in hud_entries.size():
+		var f = hud_entries[i]["fighter"]
+		if (f == null or not is_instance_valid(f)) and not _elim_order.has(i):
+			_elim_order.append(i)
 
 # Called every frame. A match with 2+ fighters ends once 1 (or 0) are left.
 # A match that STARTS with just one fighter (local, no CPUs switched on) never
@@ -142,11 +168,21 @@ func _end_match() -> void:
 	var online: bool = GameManager.selected_mode == GameManager.Mode.ONLINE
 	if online:
 		NetworkManager.send({"type": "result", "winner": winner.net_slot if winner != null else -1})
-	_show_results(winner, online)
+	# Podium order: whoever is still standing first, then the others from last
+	# knocked out (2nd) to first knocked out (last place).
+	var ranking: Array = []
+	for i in hud_entries.size():
+		if not _elim_order.has(i) and i < _infos.size():
+			ranking.append(_infos[i])
+	for k in range(_elim_order.size() - 1, -1, -1):
+		if _elim_order[k] < _infos.size():
+			ranking.append(_infos[_elim_order[k]])
+	_show_results(winner, online, ranking)
 
 # The overlay: dark backdrop, who won, and the buttons. Built in code (like
 # the HUD) so Game.tscn didn't need editing.
-func _show_results(winner: SmashPlayer, online: bool) -> void:
+func _show_results(winner: SmashPlayer, online: bool, ranking: Array = []) -> void:
+	$HUD.visible = false # the bottom stats bar would sit behind the buttons
 	var layer := CanvasLayer.new()
 	layer.layer = 20
 	add_child(layer)
@@ -181,29 +217,39 @@ func _show_results(winner: SmashPlayer, online: bool) -> void:
 		who.add_theme_color_override("font_color", winner.stats.get("ui_color", Color.WHITE))
 	box.add_child(who)
 
+	# The podium: 1st place big, then the rest (see match_screens.gd).
+	if ranking.size() >= 2:
+		MatchScreens.build_ranking(box, ranking, winner != null)
+
 	# Three choices, same words online and local:
 	#   REMATCH          same characters again (online: everyone must agree)
 	#   CHARACTER SELECT back to pick again (online: takes EVERYONE in the room)
 	#   LEAVE            back to the title screen (online: leaves the room)
+	# The three buttons sit side by side under the podium to save vertical room.
+	var btn_row := HBoxContainer.new()
+	btn_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	btn_row.add_theme_constant_override("separation", 12)
 	if online:
 		_rematch_label = Label.new()
 		_rematch_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		box.add_child(_rematch_label)
-		_rematch_button = _results_button("REMATCH", box, _on_rematch_pressed)
-		_results_button("CHARACTER SELECT", box, func(): _go_to_character_select(true))
-		_results_button("LEAVE", box, _on_leave_pressed)
+		box.add_child(btn_row)
+		_rematch_button = _results_button("REMATCH", btn_row, _on_rematch_pressed)
+		_results_button("CHARACTER SELECT", btn_row, func(): _go_to_character_select(true))
+		_results_button("LEAVE", btn_row, _on_leave_pressed)
 		_update_rematch_label()
 	else:
+		box.add_child(btn_row)
 		# Local: REMATCH reloads this scene - same characters, and any CPU
 		# set to Random rolls a new fighter (see _setup_local).
-		_results_button("REMATCH", box, func(): get_tree().reload_current_scene())
-		_results_button("CHARACTER SELECT", box, func(): _go_to_character_select(false))
-		_results_button("LEAVE", box, func(): get_tree().change_scene_to_file("res://scenes/StartScreen.tscn"))
+		_results_button("REMATCH", btn_row, func(): get_tree().reload_current_scene())
+		_results_button("CHARACTER SELECT", btn_row, func(): _go_to_character_select(false))
+		_results_button("LEAVE", btn_row, func(): get_tree().change_scene_to_file("res://scenes/StartScreen.tscn"))
 
 func _results_button(text: String, parent: Control, callback: Callable) -> Button:
 	var b := Button.new()
 	b.text = text
-	b.custom_minimum_size = Vector2(260, 44)
+	b.custom_minimum_size = Vector2(230, 44)
 	b.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	b.pressed.connect(callback)
 	parent.add_child(b)
@@ -248,12 +294,19 @@ func _update_rematch_label() -> void:
 			voted += 1
 	_rematch_label.text = "Rematch? %d / %d ready" % [voted, total]
 
+# Gives a fighter its name tag AND remembers what the intro / podium screens
+# need to show for it. Call once per fighter, in the same order they are
+# added to the `fighters` list (that order = hud_entries order).
+func _note_fighter(f: SmashPlayer, label: String, display_name: String, slot: int) -> void:
+	f.set_tag(display_name, TAG_COLORS[slot])
+	_infos.append({"label": label, "name": display_name, "color": TAG_COLORS[slot], "stats": f.stats})
+
 # Local match: you are always P1 (spawn marker 0, WASD+F); each enabled CPU
 # slot from GameManager.cpu_slots becomes the next fighter.
 func _setup_local() -> void:
 	var fighters: Array = []
 	var me := _spawn_player(_spawn_pos(0), "p1_", false, GameManager.player1_character)
-	me.set_tag("P1", TAG_COLORS[0])
+	_note_fighter(me, "P1", "P1", 0)
 	fighters.append(me)
 
 	# slot_index is the NEXT free spawn marker, not the CPU slot number - if
@@ -273,7 +326,7 @@ func _setup_local() -> void:
 		if char_index == GameManager.RANDOM_CHARACTER:
 			char_index = randi() % GameManager.characters.size()
 		var cpu := _spawn_player(_spawn_pos(slot_index), prefix, true, char_index)
-		cpu.set_tag("CPU %d" % slot_index, TAG_COLORS[slot_index])
+		_note_fighter(cpu, "CPU %d" % slot_index, "CPU %d" % slot_index, slot_index)
 		fighters.append(cpu)
 		slot_index += 1
 
@@ -301,7 +354,7 @@ func _setup_online() -> void:
 		p.net_slot = slot # so player.gd knows who to address "hit" messages to
 		# Tag = their username (or "Player N" if they have no account).
 		var tag_name: String = NetworkManager.names.get(slot, "")
-		p.set_tag(tag_name if tag_name != "" else "Player %d" % (slot + 1), TAG_COLORS[slot])
+		_note_fighter(p, "P%d" % (slot + 1), tag_name if tag_name != "" else "Player %d" % (slot + 1), slot)
 		if slot == NetworkManager.my_slot:
 			local_player = p
 			p.ko.connect(_on_local_ko)

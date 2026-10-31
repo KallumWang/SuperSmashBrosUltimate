@@ -54,6 +54,29 @@ const DEFAULT_ATTACK := {
 const SPECIAL_GLOW := Color(2.5, 2.5, 2.5) # sprite.modulate above 1.0 = brighter than normal; this is the peak of the charge glow
 const SPECIAL_FX_SCALE := 1.7 # how big the star ends up compared to the normal flash
 
+# --- Shield / dodge tuning (all in one place so it's easy to rebalance) ---
+# Hold the shield button (Shift for P1) on the ground to raise a bubble. It
+# blocks every hit (no damage, no knockback) but each block - and just holding
+# it - wears it down; it shrinks as it weakens. At 0 it BREAKS and you're
+# stunned. While shielding you can't move or attack, but you can:
+#   tap left / right  -> ROLL that way (brief invincibility)
+#   tap down          -> SPOT DODGE (brief invincibility, stay put)
+#   tap jump          -> hop out of the shield
+const SHIELD_MAX := 100.0
+const SHIELD_DRAIN := 12.0          # health lost per second just from holding it up
+const SHIELD_REGEN := 22.0          # health regained per second when it's down
+const SHIELD_DAMAGE_MULT := 2.0     # a blocked hit costs (its damage x this) shield health
+const SHIELD_MIN_TO_RAISE := 8.0    # can't raise a nearly-empty shield (stops flicker spam)
+const SHIELD_BREAK_STUN := 2.0      # seconds you're helpless after a break
+const SHIELD_AFTER_BREAK := 0.35    # fraction of shield you come back with
+const SHIELD_R_MAX := 40.0          # bubble radius (px) when full...
+const SHIELD_R_MIN := 14.0          # ...and when almost gone
+const ROLL_TIME := 0.38
+const ROLL_SPEED := 430.0
+const SPOT_DODGE_TIME := 0.32
+const DODGE_COOLDOWN := 0.25        # short lockout after a dodge so it can't be chained forever
+const SPAWN_SHIELD_TIME := 3.0      # invincible bubble after (re)spawning; ends early if you attack
+
 # Prefix for the input actions this fighter reads: "p1_" means it listens to
 # p1_left / p1_right / p1_jump / p1_down / p1_attack, which are registered
 # in autoload/InputSetup.gd. CPUs get "cpu_1_" etc. from game.gd but never
@@ -83,6 +106,23 @@ var current_strike_dir: int = 1 # which way the CURRENT swing is pointing (diffe
 # can be swapped in for one swing and the bar restored afterwards.
 var _normal_fx_polygon: PackedVector2Array
 var _special_fx_polygon: PackedVector2Array
+
+# Shield / dodge state (see the constants above).
+var shield_health: float = SHIELD_MAX
+var is_shielding: bool = false
+var shield_stun: float = 0.0        # after blocking a hit you can't drop the shield for a moment
+var stun_time: float = 0.0          # >0 = helpless (shield break)
+var dodge_time: float = 0.0         # >0 = mid roll / spot dodge (invincible, can't act)
+var dodge_kind: String = ""         # "roll" or "spot"
+var dodge_dir: int = 1
+var dodge_cooldown: float = 0.0
+var spawn_shield_time: float = 0.0  # >0 = spawn bubble up (invincible)
+var _bubble: Polygon2D              # the visible bubble (made in code in _ready)
+var _bubble_flash: float = 0.0      # brightens the bubble briefly when it blocks a hit
+var bubble_r: float = 0.0           # radius being drawn right now; 0 = hidden. Sent to other players so puppets show it too
+var _ghost: bool = false            # fighter drawn see-through (dodging)
+var _dizzy: bool = false            # fighter tinted (shield broken)
+var _cpu_block_timer: float = 0.0   # CPU only: how much longer it keeps its shield up
 
 # Emitted from _on_ko() every time this fighter loses a stock. Nothing is
 # connected to it right now (game.gd's HUD just polls damage_percent/stocks
@@ -120,6 +160,17 @@ func _ready() -> void:
 	# swing (see _do_attack) - otherwise it would hit anyone standing in it.
 	hitbox.monitoring = false
 	hitbox.body_entered.connect(_on_hitbox_body_entered)
+	# The shield bubble: a unit circle that gets scaled to the radius we want.
+	_bubble = Polygon2D.new()
+	var circle := PackedVector2Array()
+	for i in 32:
+		circle.append(Vector2(cos(TAU * i / 32.0), sin(TAU * i / 32.0)))
+	_bubble.polygon = circle
+	_bubble.position = Vector2(0, -32) # chest height, like the hitbox
+	_bubble.z_index = 3
+	_bubble.visible = false
+	add_child(_bubble)
+	spawn_shield_time = SPAWN_SHIELD_TIME
 	_update_label()
 
 func _physics_process(delta: float) -> void:
@@ -129,10 +180,24 @@ func _physics_process(delta: float) -> void:
 		# _on_network_message), not local simulation. Still update its
 		# animation so it visually reflects whatever state just arrived.
 		_update_animation()
+		_draw_bubble(delta)
+		_apply_tint()
 		return
 
 	if attack_cooldown > 0.0:
 		attack_cooldown -= delta
+	dodge_cooldown = maxf(dodge_cooldown - delta, 0.0)
+	shield_stun = maxf(shield_stun - delta, 0.0)
+	spawn_shield_time = maxf(spawn_shield_time - delta, 0.0)
+	if stun_time > 0.0:
+		stun_time -= delta
+		if stun_time <= 0.0:
+			stun_time = 0.0
+	if dodge_time > 0.0:
+		dodge_time -= delta
+		if dodge_time <= 0.0:
+			dodge_time = 0.0
+			dodge_cooldown = DODGE_COOLDOWN
 
 	# Gravity only while airborne; touching the floor refills jumps. (is_on_floor()
 	# reports what happened during LAST frame's move_and_slide() below.)
@@ -150,6 +215,10 @@ func _physics_process(delta: float) -> void:
 	var attack_pressed := false
 	var special_pressed := false # the special button (G) - picks one of the "special_*" moves instead
 	var variant := "neutral" # which move in stats["attacks"] to use ("neutral", "up", "special_side"...)
+	var shield_held := false # the shield button is down
+	var left_tap := false # just-pressed this frame (used for rolls out of shield)
+	var right_tap := false
+	var down_tap := false # (spot dodge)
 	var old_facing := facing # remembered BEFORE we update facing below - that's how "back" can tell you just turned around
 
 	if is_cpu:
@@ -159,6 +228,11 @@ func _physics_process(delta: float) -> void:
 		jump_pressed = cpu_result[1]
 		attack_pressed = cpu_result[2]
 		variant = cpu_result[3]
+		shield_held = cpu_result[4]
+		# The CPU rolls out of its shield sometimes, so it isn't just a statue.
+		if shield_held and is_shielding and randf() < 0.01:
+			left_tap = randf() < 0.5
+			right_tap = not left_tap
 	else:
 		direction = Input.get_axis(input_prefix + "left", input_prefix + "right")
 		# "just_pressed" = only the frame the key goes down (one jump per tap)...
@@ -175,6 +249,11 @@ func _physics_process(delta: float) -> void:
 			# This one should act as a pivot attack or backstrike 🙏🙏🙏✌️✌️
 			# (holding the opposite way of where you're currently facing)
 			variant = "back"
+		if InputMap.has_action(input_prefix + "shield"):
+			shield_held = Input.is_action_pressed(input_prefix + "shield")
+		left_tap = Input.is_action_just_pressed(input_prefix + "left")
+		right_tap = Input.is_action_just_pressed(input_prefix + "right")
+		down_tap = Input.is_action_just_pressed(input_prefix + "down")
 
 		# Specials. The guard is there so the game doesn't spam errors if the
 		# "special" action hasn't been registered in InputSetup.gd yet (an
@@ -195,6 +274,50 @@ func _physics_process(delta: float) -> void:
 			else:
 				variant = "special_neutral"
 
+	# --- Step 1.5: shield / dodge / stun ---
+	# These override what the fighter wanted to do above.
+	var locked := stun_time > 0.0 or dodge_time > 0.0 # helpless: no moving, jumping or attacking
+	if locked:
+		is_shielding = false
+		direction = 0.0
+		jump_pressed = false
+		attack_pressed = false
+		special_pressed = false
+	else:
+		if shield_held and not is_attacking and is_on_floor() \
+				and (is_shielding or (shield_health >= SHIELD_MIN_TO_RAISE and dodge_cooldown <= 0.0)):
+			is_shielding = true
+		elif is_shielding and shield_stun > 0.0 and is_on_floor():
+			pass # just blocked a hit: can't drop it instantly (shield stun)
+		else:
+			is_shielding = false
+	if is_shielding:
+		shield_health -= SHIELD_DRAIN * delta
+		if jump_pressed:
+			is_shielding = false # hop out of the shield (the jump below still happens)
+		elif (left_tap or right_tap) and shield_stun <= 0.0:
+			is_shielding = false
+			dodge_kind = "roll"
+			dodge_dir = 1 if right_tap else -1
+			dodge_time = ROLL_TIME
+			_ghost = true
+			direction = 0.0
+		elif down_tap and shield_stun <= 0.0:
+			is_shielding = false
+			dodge_kind = "spot"
+			dodge_time = SPOT_DODGE_TIME
+			_ghost = true
+			direction = 0.0
+		else:
+			# Shielding = rooted and can't attack.
+			direction = 0.0
+			attack_pressed = false
+			special_pressed = false
+			if shield_health <= 0.0:
+				_shield_break(0)
+	elif not locked:
+		shield_health = minf(shield_health + SHIELD_REGEN * delta, SHIELD_MAX)
+
 	# --- Step 2: apply it ---
 	var speed: float = stats.get("speed", 300.0)
 	if direction != 0.0:
@@ -205,6 +328,12 @@ func _physics_process(delta: float) -> void:
 	else:
 		# No input: ramp back down to a stop
 		velocity.x = move_toward(velocity.x, 0.0, FRICTION * delta)
+
+	if dodge_time > 0.0:
+		# Rolls slide you along the ground; spot dodges stay put.
+		velocity.x = dodge_dir * ROLL_SPEED if dodge_kind == "roll" else 0.0
+	elif is_shielding:
+		velocity.x = move_toward(velocity.x, 0.0, FRICTION * 2.0 * delta) # sliding to a stop after a block's pushback
 
 	# Negative jump_velocity because up is negative y. Works mid-air too as
 	# long as jumps_left > 0 - that's the double/triple jump.
@@ -224,6 +353,8 @@ func _physics_process(delta: float) -> void:
 	# mask layer 1 (the stage - see Player.tscn), so they walk through each other.
 	move_and_slide()
 	_update_animation()
+	_draw_bubble(delta)
+	_apply_tint()
 
 	# Blast line checks. Top blast is separate so it can trigger the Screen KO splat.
 	if global_position.y < BLAST_TOP_Y:
@@ -253,6 +384,7 @@ func _update_animation() -> void:
 # "special_side" / "special_up" / "special_down" - a key in stats["attacks"].
 func _do_attack(variant: String = "neutral") -> void:
 	is_attacking = true
+	spawn_shield_time = 0.0 # swinging pops the spawn bubble
 	# Online: tell the other players we just swung, so THEIR copy of us
 	# (the puppet) plays the same swing - animation, flash, special glow.
 	# (Puppets run this same function from show_remote_attack, which is why
@@ -388,6 +520,18 @@ func _on_hitbox_body_entered(hit_body: Node) -> void:
 # dmg - percent to add; from_dir - 1 sends them right, -1 sends them left;
 # the rest are the attacker's kb_base / kb_scale / angle numbers.
 func take_hit(dmg: float, from_dir: int, kb_base: float = 150.0, kb_scale: float = 6.0, angle_deg: float = 35.0) -> void:
+	# Dodging (roll / spot dodge) or standing in the spawn bubble: the hit simply misses.
+	if dodge_time > 0.0 or spawn_shield_time > 0.0:
+		return
+	# Blocking: no damage, no knockback - the hit chews up the shield instead.
+	if is_shielding:
+		shield_health -= dmg * SHIELD_DAMAGE_MULT
+		shield_stun = 0.05 + dmg * 0.008 # a short moment where you can't let go
+		velocity.x = from_dir * clampf(dmg * 18.0, 60.0, 260.0) # small pushback
+		_bubble_flash = 0.12
+		if shield_health <= 0.0:
+			_shield_break(from_dir)
+		return
 	damage_percent += dmg # damage goes up FIRST so this very hit already counts toward its own knockback
 	var weight: float = stats.get("weight", 1.0)
 	# The knockback formula (also written out in the README): base push plus
@@ -406,6 +550,59 @@ func take_hit(dmg: float, from_dir: int, kb_base: float = 150.0, kb_scale: float
 	_update_label()
 	if sprite.sprite_frames.has_animation("hurt"):
 		sprite.play("hurt")
+
+# The shield ran out: the bubble pops, you hop up helpless for a couple of
+# seconds, then come back with a partly-filled shield.
+func _shield_break(from_dir: int) -> void:
+	is_shielding = false
+	shield_health = SHIELD_MAX * SHIELD_AFTER_BREAK
+	stun_time = SHIELD_BREAK_STUN
+	shield_stun = 0.0
+	velocity = Vector2(from_dir * 120.0, -520.0)
+	_dizzy = true
+	_bubble_flash = 0.0
+
+# Shows / sizes the bubble. Local fighters work out the radius from their own
+# state; puppets just use the radius that came in the last "state" message
+# (see apply_remote_state), so everyone sees everyone's shields.
+func _draw_bubble(delta: float) -> void:
+	if not is_remote:
+		bubble_r = 0.0
+		if is_shielding:
+			bubble_r = lerpf(SHIELD_R_MIN, SHIELD_R_MAX, clampf(shield_health / SHIELD_MAX, 0.0, 1.0))
+		elif spawn_shield_time > 0.0:
+			bubble_r = SHIELD_R_MAX
+			# blink during the last moments so you can tell it's about to end
+			if spawn_shield_time < 0.7 and int(spawn_shield_time * 10.0) % 2 == 0:
+				bubble_r = 0.0
+	_bubble_flash = maxf(_bubble_flash - delta, 0.0)
+	_bubble.visible = bubble_r > 0.5
+	if not _bubble.visible:
+		return
+	_bubble.scale = Vector2(bubble_r, bubble_r)
+	var col: Color = stats.get("color", Color.WHITE)
+	# Weak shields redden, like Smash's.
+	var weak := 0.0
+	if is_shielding or is_remote:
+		weak = 1.0 - clampf((bubble_r - SHIELD_R_MIN) / (SHIELD_R_MAX - SHIELD_R_MIN), 0.0, 1.0)
+	col = col.lightened(0.1).lerp(Color(1.0, 0.25, 0.2), weak * 0.7)
+	var alpha := 0.6 if _bubble_flash > 0.0 else 0.42
+	_bubble.color = Color(col, alpha)
+
+# See-through while dodging; yellowish while stunned. Local fighters derive it
+# from their own timers; puppets get the two flags in each state message.
+func _apply_tint() -> void:
+	if not is_remote:
+		_ghost = dodge_time > 0.0
+		_dizzy = stun_time > 0.0
+	if is_attacking:
+		return # a swing controls the sprite's colour (special glow) - leave it alone
+	if _dizzy:
+		sprite.modulate = Color(1.0, 1.0, 0.45)
+	elif _ghost:
+		sprite.modulate = Color(1.0, 1.0, 1.0, 0.45)
+	elif sprite.modulate != Color.WHITE:
+		sprite.modulate = Color.WHITE
 
 # Refreshes the little "12%" text floating above the fighter's head (the
 # DamageLabel node in Player.tscn). The `if damage_label:` guard is there
@@ -433,6 +630,13 @@ func _on_ko(top_blast: bool = false) -> void:
 		# so -200 drops them onto it) with no leftover momentum.
 		global_position = Vector2(0, -200)
 		velocity = Vector2.ZERO
+		# Fresh start: full shield, nothing carried over, and the spawn bubble.
+		shield_health = SHIELD_MAX
+		is_shielding = false
+		stun_time = 0.0
+		dodge_time = 0.0
+		shield_stun = 0.0
+		spawn_shield_time = SPAWN_SHIELD_TIME
 
 # The CPU's whole brain. Deliberately dumb: it fakes the same inputs a human
 # would give and returns them as [direction, jump_pressed, attack_pressed, variant]
@@ -442,6 +646,7 @@ func _cpu_think() -> Array:
 	var jump_pressed := false
 	var attack_pressed := false
 	var variant := "neutral"
+	var shield_up := false
 	var target: SmashPlayer = _nearest_opponent()
 	if target != null:
 		var to_opp: Vector2 = target.global_position - global_position
@@ -458,7 +663,15 @@ func _cpu_think() -> Array:
 		# ready. Up attack if they're above, down attack if they're below
 		# AND we're airborne (a down attack on the ground would just whiff
 		# at their feet). The CPU never picks "back" - see the README.
-		if absf(to_opp.x) < 60.0 and attack_cooldown <= 0.0:
+		# Defence: when an opponent swings at us from close range, sometimes put
+		# the shield up for a moment (it has to react, so it isn't unbeatable).
+		_cpu_block_timer = maxf(_cpu_block_timer - get_physics_process_delta_time(), 0.0)
+		if target.is_attacking and absf(to_opp.x) < 90.0 and is_on_floor() and not is_attacking \
+				and _cpu_block_timer <= 0.0 and shield_health > 30.0 and randf() < 0.2:
+			_cpu_block_timer = randf_range(0.3, 0.7)
+		if _cpu_block_timer > 0.0:
+			shield_up = true
+		elif absf(to_opp.x) < 60.0 and attack_cooldown <= 0.0:
 			attack_pressed = true
 			if to_opp.y < -50.0:
 				variant = "up"
@@ -470,7 +683,7 @@ func _cpu_think() -> Array:
 		direction = 1.0
 	elif global_position.x > 320.0:
 		direction = -1.0
-	return [direction, jump_pressed, attack_pressed, variant]
+	return [direction, jump_pressed, attack_pressed, variant, shield_up]
 
 # Builds a star outline for the special-move flash: `points` tips, alternating
 # between the outer radius (the tips) and the inner radius (the dents) as it
@@ -561,6 +774,9 @@ func apply_remote_state(data: Dictionary) -> void:
 	global_position = Vector2(data.get("x", global_position.x), data.get("y", global_position.y))
 	velocity = Vector2(data.get("vx", 0.0), data.get("vy", 0.0))
 	damage_percent = data.get("dmg", damage_percent)
+	bubble_r = float(data.get("br", 0.0)) # shield / spawn bubble size
+	_ghost = bool(data.get("gh", false))  # dodging
+	_dizzy = bool(data.get("st", false))  # stunned
 	stocks = int(data.get("stocks", stocks))
 	facing = int(data.get("facing", facing))
 	sprite.flip_h = facing < 0

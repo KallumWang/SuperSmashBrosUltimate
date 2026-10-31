@@ -146,13 +146,13 @@ func _on_copy_code_pressed() -> void:
 
 func _on_back_pressed() -> void:
 	NetworkManager.close_connection() # drop out of the room if we were in one
-	get_tree().change_scene_to_file("res://scenes/ModeSelect.tscn")
+	Scenes.go(get_tree(), "res://scenes/ModeSelect.tscn")
 
 # The host started the match (NetworkManager's "go"). The status text is set
 # but you'll barely see it, since the scene changes on the very next line.
 func _on_room_ready() -> void:
 	status_label.text = "Starting! Choose your character..."
-	get_tree().change_scene_to_file("res://scenes/CharacterSelect.tscn")
+	Scenes.go(get_tree(), "res://scenes/CharacterSelect.tscn")
 
 func _on_connection_failed() -> void:
 	status_label.text = "Couldn't connect. Double-check the room code and try again."
