@@ -227,11 +227,39 @@ Note: this multi-CPU flow is **local only**. Online mode has its own 4-player sy
   else, or getting hit, ends it. Everyone online sees the dance and bubble.
 - **Emote wheel (hold E; P2 `M`):** a ring of 8 slots opens, **scroll the mouse
   wheel** to pick one and **release** the key to send it as a bubble. The
-  slots are empty for now - fill them in `scripts/emotes.gd` (`SLOTS`: `{"text":
+  slots are empty except slot 1, **STANCE**: the manji-kick pose - both feet planted,
+  then one leg chambers out to the side as the body sinks and leans (3 s, cancelled by moving/attacking/
+  getting hit; other players see it too). Fill the rest in `scripts/emotes.gd` (`SLOTS`: `{"text":
   "GG!", "icon": "res://emotes/gg.png"}`).
 - **Settings** (title screen): music volume + mute, and **rebind every key** for
   both players (click a key, press the new one; Esc cancels; a key already in
   use swaps with the other action). Saved in `user://settings.cfg`.
+
+## Victory flashes
+
+`scripts/victory_flash.gd` plays a short cartoon cutscene between the last KO
+and the podium (any key skips it). Two so far: the **slot machine** (4-fighter
+matches only: the winner pulls the lever and the reels land on the other three
+fighters with X-ed out eyes) and **"Nah, I'd win"** (any match with 2+ fighters:
+a manga-style close-up of 2nd place with two speech bubbles, then a smash cut to
+the winner standing over them, cut in half cartoon-style), and the **speed-up
+punch** (2+ fighters: the winner runs at a random other fighter, accelerating
+exponentially with afterimages and rushing ground, and punches them; it ends on
+a tilted close-up of the fist, flying glass and the victim hurled across a
+canyon). The game picks one at random (online, all players' games pick the same one). A draw
+has no flash. To add one, write a `_my_flash(ranking)` function and register it
+in `KINDS` (with the fewest fighters it needs) and `play()`. **Random** on Character Select now stays on the
+"?" tile (`GameManager.player1_random`) and rolls a new fighter each match.
+
+Three more: **stairs** (2+ fighters: the winner climbs an endless staircase, a step
+counter ticking up to ∞, with a giant grinning picture of them behind), **laugh**
+(2+ fighters: 1st and 2nd are huge, howling with laughter over whoever came last; with 2 players the winner laughs on both sides),
+and **waffle** (2+ fighters: last place creeps up, thinks better of it and jumps
+back, then the winner throws a flying waffle that cuts them into a 3x3 grid).
+Every flash has an equal chance among the ones the lobby size allows
+(`KINDS` in `victory_flash.gd`). **To test that**: `godot --headless --path . -s
+tests/flash_odds.gd` checks each flash is wired up and prints the pick
+percentages for 2, 3 and 4 fighters (should all be close to fair).
 
 ## Music and transitions
 

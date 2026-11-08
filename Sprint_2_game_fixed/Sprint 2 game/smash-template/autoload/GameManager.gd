@@ -32,6 +32,10 @@ var online_picks: Dictionary = {}
 # character for this CPU" - game.gd's _setup_local() rolls the dice each
 # time a match starts, so "Random" gives a different fighter every match.
 const RANDOM_CHARACTER := -1
+# True when P1 picked the "?" Random tile. player1_character then holds the
+# character that was ROLLED for the match, so this flag is how Character Select
+# remembers to show "?" again (and how a local rematch knows to roll again).
+var player1_random: bool = false
 var cpu_slots: Array = [
 	{"enabled": true, "character": 0}, # fixed up in _ready() below - needs "characters" to exist first
 	{"enabled": false, "character": 0},

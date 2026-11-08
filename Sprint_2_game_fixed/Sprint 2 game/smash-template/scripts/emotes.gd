@@ -11,7 +11,8 @@ extends RefCounted
 ## The online game sends only the text, so everyone sees the same bubble.
 
 const SLOTS: Array[Dictionary] = [
-	{}, {}, {}, {},
+	{"label": "STANCE", "pose": "manji"}, # manji kick stance (the rainbow-aura pose is still in player.gd: use "rainbow")
+	{}, {}, {},
 	{}, {}, {}, {},
 ]
 
@@ -22,4 +23,4 @@ static func taunt_line() -> String:
 	return TAUNT_LINES[randi() % TAUNT_LINES.size()]
 
 static func is_filled(slot: int) -> bool:
-	return slot >= 0 and slot < SLOTS.size() and str(SLOTS[slot].get("text", "")) != ""
+	return slot >= 0 and slot < SLOTS.size() and str(SLOTS[slot].get("text", "")) != "" or str(SLOTS[slot].get("pose", "")) != ""

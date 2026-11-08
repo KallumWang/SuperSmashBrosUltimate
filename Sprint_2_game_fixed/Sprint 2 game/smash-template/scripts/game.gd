@@ -22,6 +22,8 @@ const TAG_COLORS := [
 
 # Pre-/post-match screens (VS intro + podium) - see match_screens.gd.
 const MatchScreens := preload("res://scripts/match_screens.gd")
+# The cartoon cutscene that plays before the podium - see victory_flash.gd.
+const VictoryFlash := preload("res://scripts/victory_flash.gd")
 
 # Node paths into Game.tscn. players_root is the node every fighter gets
 # added under; hud_entries_box is the HBoxContainer in the bottom bar where
@@ -97,7 +99,7 @@ func _state_message() -> Dictionary:
 		"dmg": local_player.damage_percent, "stocks": local_player.stocks,
 		"facing": local_player.facing,
 		# visuals for the other players' copy of us: shield bubble size, see-through (dodging), stunned
-		"br": local_player.bubble_r, "gh": local_player.dodge_time > 0.0, "st": local_player.stun_time > 0.0, "tn": local_player.is_taunting,
+		"br": local_player.bubble_r, "gh": local_player.dodge_time > 0.0, "st": local_player.stun_time > 0.0, "tn": local_player.is_taunting, "ps": local_player.pose,
 	}
 
 # Our fighter just lost a stock (SmashPlayer's `ko` signal, connected in
@@ -226,7 +228,12 @@ func _close_wheel(send: bool) -> void:
 	if _wheel_layer != null:
 		_wheel_layer.visible = false
 	if send and Emotes.is_filled(_wheel_sel):
-		_send_bubble(_my_slot(), str(Emotes.SLOTS[_wheel_sel]["text"]), false)
+		var emote: Dictionary = Emotes.SLOTS[_wheel_sel]
+		var me = _my_fighter()
+		if str(emote.get("pose", "")) != "" and me != null:
+			me.start_pose(str(emote["pose"]))
+		if str(emote.get("text", "")) != "":
+			_send_bubble(_my_slot(), str(emote["text"]), false)
 
 # The mouse wheel turns the selection (up = clockwise) while the wheel is open.
 func _unhandled_input(event: InputEvent) -> void:
@@ -272,7 +279,7 @@ func _build_wheel() -> void:
 		var lbl := Label.new()
 		lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		lbl.add_theme_font_size_override("font_size", 13)
-		lbl.text = str(Emotes.SLOTS[i].get("text", "")) if Emotes.is_filled(i) else "-"
+		lbl.text = str(Emotes.SLOTS[i].get("text", Emotes.SLOTS[i].get("label", ""))) if Emotes.is_filled(i) else "-"
 		content.add_child(lbl)
 		ring.add_child(cell)
 		_wheel_cells.append(cell)
@@ -341,6 +348,15 @@ func _end_match() -> void:
 	for k in range(_elim_order.size() - 1, -1, -1):
 		if _elim_order[k] < _infos.size():
 			ranking.append(_infos[_elim_order[k]])
+	# Victory flash first (skipped on a draw, or when a test sets "skip_flash"),
+	# then the podium. The fighters are frozen and the HUD hidden meanwhile.
+	if winner != null and ranking.size() >= 2 and not GameManager.has_meta("skip_flash"):
+		$HUD.visible = false
+		Music.play(get_tree(), "results")
+		var flash := VictoryFlash.new()
+		add_child(flash)
+		await flash.play(ranking, online)
+		flash.queue_free()
 	_show_results(winner, online, ranking)
 
 # The overlay: dark backdrop, who won, and the buttons. Built in code (like
@@ -474,7 +490,11 @@ func _note_fighter(f: SmashPlayer, label: String, display_name: String, slot: in
 # slot from GameManager.cpu_slots becomes the next fighter.
 func _setup_local() -> void:
 	var fighters: Array = []
-	var me := _spawn_player(_spawn_pos(0), "p1_", false, GameManager.player1_character)
+	# P1 on Random rolls a NEW fighter every match (rematches too).
+	var p1_char: int = GameManager.player1_character
+	if GameManager.player1_random:
+		p1_char = randi() % GameManager.characters.size()
+	var me := _spawn_player(_spawn_pos(0), "p1_", false, p1_char)
 	_note_fighter(me, "P1", "P1", 0)
 	fighters.append(me)
 

@@ -6,7 +6,7 @@ class_name SmashPlayer
 ## every one from Player.tscn). What makes them different is just the
 ## @export vars below: is_cpu swaps the input for _cpu_think(), is_remote
 ## turns the whole thing into a puppet, and stats decides how they play.
-## 
+##
 ## Four attack directions:
 # tap attack for neutral,
 # hold jump + attack for up,
@@ -138,6 +138,26 @@ var taunt_cooldown: float = 0.0
 var _sprite_base_pos: Vector2 = Vector2.ZERO
 var _dance_clock: float = 0.0
 
+# Emote pose (the first emote-wheel slot: arms out, rainbow aura). Also synced
+# to other players (state key "ps").
+const POSE_DURATION := 3.2
+var pose: String = ""
+var pose_time: float = 0.0
+var _pose_fx: Node2D = null
+var _pose_halo: Node2D = null
+var _pose_particles: CPUParticles2D = null
+var _pose_arms: Array = []
+
+## Starts an emote pose (only when standing around doing nothing).
+func start_pose(name: String) -> bool:
+	if is_remote or pose != "" or not is_on_floor() or is_attacking or stun_time > 0.0 \
+			or dodge_time > 0.0 or is_shielding:
+		return false
+	is_taunting = false
+	pose = name
+	pose_time = 0.0
+	return true
+
 # Emitted when this (locally controlled) fighter starts a taunt - game.gd shows the bubble.
 signal taunted(player)
 
@@ -201,6 +221,7 @@ func _physics_process(delta: float) -> void:
 		_draw_bubble(delta)
 		_apply_tint()
 		_apply_dance(delta)
+		_apply_pose(delta)
 		return
 
 	if attack_cooldown > 0.0:
@@ -299,6 +320,16 @@ func _physics_process(delta: float) -> void:
 			else:
 				variant = "special_neutral"
 
+	# --- Emote pose ---
+	if pose != "":
+		pose_time += delta
+		var broken := direction != 0.0 or jump_pressed or attack_pressed or special_pressed \
+			or shield_held or stun_time > 0.0 or dodge_time > 0.0 or not is_on_floor()
+		if broken or pose_time >= POSE_DURATION:
+			pose = ""
+		else:
+			direction = 0.0
+
 	# --- Taunt (dance) ---
 	# Starts on the ground when nothing else is going on; ends when the key is
 	# let go (after the minimum time) or the moment you do anything else.
@@ -311,7 +342,7 @@ func _physics_process(delta: float) -> void:
 			taunt_cooldown = TAUNT_COOLDOWN
 		else:
 			direction = 0.0 # rooted while dancing
-	elif taunt_pressed and taunt_cooldown <= 0.0 and is_on_floor() and not is_attacking \
+	elif taunt_pressed and pose == "" and taunt_cooldown <= 0.0 and is_on_floor() and not is_attacking \
 			and stun_time <= 0.0 and dodge_time <= 0.0 and not is_shielding and not shield_held:
 		is_taunting = true
 		taunt_time = 0.0
@@ -399,6 +430,7 @@ func _physics_process(delta: float) -> void:
 	_draw_bubble(delta)
 	_apply_tint()
 	_apply_dance(delta)
+	_apply_pose(delta)
 
 	# Blast line checks. Top blast is separate so it can trigger the Screen KO splat.
 	if global_position.y < BLAST_TOP_Y:
@@ -568,6 +600,7 @@ func take_hit(dmg: float, from_dir: int, kb_base: float = 150.0, kb_scale: float
 	if dodge_time > 0.0 or spawn_shield_time > 0.0:
 		return
 	is_taunting = false # getting hit ends the dance
+	pose = ""
 	# Blocking: no damage, no knockback - the hit chews up the shield instead.
 	if is_shielding:
 		shield_health -= dmg * SHIELD_DAMAGE_MULT
@@ -653,6 +686,166 @@ func _apply_dance(delta: float) -> void:
 		sprite.scale = Vector2.ONE
 		sprite.flip_h = facing < 0
 
+# The rainbow-aura pose: arms thrown wide, a spinning rainbow halo behind the
+# fighter and a fountain of rainbow sparkles. Built the first time it's needed,
+# switched on/off by `pose`.
+func _apply_pose(delta: float) -> void:
+	_apply_manji(delta)
+	var on := pose == "rainbow"
+	if on and _pose_fx == null:
+		_build_pose_fx()
+	if _pose_fx == null:
+		return
+	_pose_fx.visible = on
+	_pose_particles.emitting = on
+	if not on:
+		return
+	var grow := minf(pose_time / 0.25, 1.0)
+	_pose_halo.rotation += delta * 1.6
+	_pose_halo.scale = Vector2.ONE * (0.4 + 0.6 * grow) * (1.0 + sin(pose_time * 8.0) * 0.05)
+	for arm in _pose_arms:
+		(arm as Node2D).scale.x = grow
+	sprite.position = _sprite_base_pos + Vector2(0, -sin(grow * PI * 0.5) * 3.0)
+
+# The "manji kick" stance: both feet planted, then the front foot slides out to
+# the side while the body sinks and leans the other way. The fighter's own
+# foot is cut out of the sprite (shader) and a copy of just that foot is moved.
+const FOOT_SHADER := """
+shader_type canvas_item;
+uniform float side = 1.0;
+uniform float y_min = 10.0;
+uniform bool keep_only = false;
+varying vec2 lp;
+void vertex() { lp = VERTEX; }
+void fragment() {
+	bool in_zone = lp.y > y_min && lp.x * side > 0.0;
+	if (keep_only != in_zone) { discard; }
+}
+"""
+var _foot_clone: AnimatedSprite2D = null
+var _foot_mat_body: ShaderMaterial = null
+var _foot_mat_foot: ShaderMaterial = null
+var _manji_active: bool = false
+
+func _sprite_height() -> float:
+	var h := 40.0
+	var frames := sprite.sprite_frames
+	if frames != null and frames.has_animation("idle") and frames.get_frame_count("idle") > 0:
+		var tex := frames.get_frame_texture("idle", 0)
+		if tex != null:
+			h = float(tex.get_height())
+	return h
+
+func _apply_manji(_delta: float) -> void:
+	var on := pose == "manji"
+	if not on:
+		if _manji_active:
+			_manji_active = false
+			sprite.material = null
+			sprite.rotation = 0.0
+			sprite.scale = Vector2.ONE
+			sprite.position = _sprite_base_pos
+			if _foot_clone != null:
+				_foot_clone.visible = false
+		return
+	var h := _sprite_height()
+	if _foot_clone == null:
+		var sh := Shader.new()
+		sh.code = FOOT_SHADER
+		_foot_mat_body = ShaderMaterial.new()
+		_foot_mat_body.shader = sh
+		_foot_mat_foot = ShaderMaterial.new()
+		_foot_mat_foot.shader = sh
+		_foot_mat_foot.set_shader_parameter("keep_only", true)
+		_foot_clone = AnimatedSprite2D.new()
+		add_child(_foot_clone)
+	_manji_active = true
+	var dir := 1.0 if facing >= 0 else -1.0
+	var y_min := h * 0.5 - h * 0.085 # just the bottom strip = the foot
+	for m in [_foot_mat_body, _foot_mat_foot]:
+		(m as ShaderMaterial).set_shader_parameter("side", dir)
+		(m as ShaderMaterial).set_shader_parameter("y_min", y_min)
+	sprite.material = _foot_mat_body
+	var t := clampf((pose_time - 0.35) / 0.3, 0.0, 1.0) # 0 = standing, 1 = foot out
+	t = t * t * (3.0 - 2.0 * t)
+	sprite.position = _sprite_base_pos + Vector2(0, 3.0 * t)
+	sprite.rotation = -dir * 0.12 * t
+	sprite.scale = Vector2(1.0, 1.0 - 0.06 * t)
+	var c := _foot_clone
+	c.visible = true
+	c.sprite_frames = sprite.sprite_frames
+	c.animation = sprite.animation
+	c.frame = sprite.frame
+	c.flip_h = sprite.flip_h
+	c.centered = sprite.centered
+	c.offset = sprite.offset
+	c.modulate = sprite.modulate
+	c.material = _foot_mat_foot
+	c.scale = sprite.scale
+	c.rotation = sprite.rotation * 0.3
+	c.position = sprite.position + Vector2(dir * h * 0.42 * t, -h * 0.1 * t)
+
+func _build_pose_fx() -> void:
+	_pose_fx = Node2D.new()
+	_pose_fx.position = _sprite_base_pos + Vector2(0, -2)
+	add_child(_pose_fx)
+	move_child(_pose_fx, 0) # drawn before (behind) the sprite
+	var rainbow := [Color(1, 0.25, 0.25), Color(1, 0.6, 0.15), Color(1, 0.9, 0.2), Color(0.3, 0.9, 0.35), Color(0.3, 0.65, 1), Color(0.65, 0.4, 1)]
+	_pose_halo = Node2D.new()
+	_pose_fx.add_child(_pose_halo)
+	var n := 18
+	for i in n:
+		var wedge := Polygon2D.new()
+		var a0 := TAU * i / n
+		var a1 := TAU * (i + 0.9) / n
+		wedge.polygon = PackedVector2Array([Vector2.ZERO, Vector2(cos(a0), sin(a0)) * 95.0, Vector2(cos(a1), sin(a1)) * 95.0])
+		var c: Color = rainbow[i % rainbow.size()]
+		wedge.color = Color(c.r, c.g, c.b, 0.45)
+		_pose_halo.add_child(wedge)
+	var body_h := 40.0
+	var frames := sprite.sprite_frames
+	if frames != null and frames.has_animation("idle") and frames.get_frame_count("idle") > 0:
+		var tex := frames.get_frame_texture("idle", 0)
+		if tex != null:
+			body_h = tex.get_height() * absf(sprite.scale.y)
+	_pose_arms.clear()
+	for dir in [-1.0, 1.0]: # arms flung out to the sides
+		var arm := Node2D.new()
+		arm.position = Vector2(0, -body_h * 0.1)
+		var outline := Line2D.new()
+		outline.width = 11.0
+		outline.default_color = Color.BLACK
+		outline.points = PackedVector2Array([Vector2.ZERO, Vector2(dir * 30.0, -9.0)])
+		arm.add_child(outline)
+		var fill := Line2D.new()
+		fill.width = 7.0
+		fill.default_color = stats.get("color", Color.WHITE)
+		fill.points = outline.points
+		arm.add_child(fill)
+		_pose_fx.add_child(arm)
+		_pose_arms.append(arm)
+	_pose_particles = CPUParticles2D.new()
+	_pose_particles.amount = 60
+	_pose_particles.lifetime = 1.1
+	_pose_particles.local_coords = false
+	_pose_particles.direction = Vector2(0, -1)
+	_pose_particles.spread = 80.0
+	_pose_particles.initial_velocity_min = 40.0
+	_pose_particles.initial_velocity_max = 110.0
+	_pose_particles.gravity = Vector2(0, -20)
+	_pose_particles.scale_amount_min = 2.5
+	_pose_particles.scale_amount_max = 5.5
+	_pose_particles.emission_shape = CPUParticles2D.EMISSION_SHAPE_SPHERE
+	_pose_particles.emission_sphere_radius = 30.0
+	var ramp := Gradient.new()
+	ramp.colors = PackedColorArray(rainbow)
+	var offs := PackedFloat32Array()
+	for i in rainbow.size():
+		offs.append(float(i) / (rainbow.size() - 1))
+	ramp.offsets = offs
+	_pose_particles.color_initial_ramp = ramp
+	_pose_fx.add_child(_pose_particles)
+
 # See-through while dodging; yellowish while stunned. Local fighters derive it
 # from their own timers; puppets get the two flags in each state message.
 func _apply_tint() -> void:
@@ -702,6 +895,7 @@ func _on_ko(top_blast: bool = false) -> void:
 		shield_stun = 0.0
 		spawn_shield_time = SPAWN_SHIELD_TIME
 		is_taunting = false
+		pose = ""
 
 # The CPU's whole brain. Deliberately dumb: it fakes the same inputs a human
 # would give and returns them as [direction, jump_pressed, attack_pressed, variant]
@@ -841,6 +1035,7 @@ func apply_remote_state(data: Dictionary) -> void:
 	damage_percent = data.get("dmg", damage_percent)
 	bubble_r = float(data.get("br", 0.0)) # shield / spawn bubble size
 	is_taunting = bool(data.get("tn", false)) # dancing
+	pose = str(data.get("ps", ""))
 	_ghost = bool(data.get("gh", false))  # dodging
 	_dizzy = bool(data.get("st", false))  # stunned
 	stocks = int(data.get("stocks", stocks))

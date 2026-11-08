@@ -1,4 +1,16 @@
 extends Control
+const MatchScreens := preload("res://scripts/match_screens.gd")
+
+## A pixel cat picture for a roster entry (what the old face square became).
+static func _cat_rect(data: Dictionary, size: Vector2) -> TextureRect:
+	var tr := TextureRect.new()
+	tr.texture = MatchScreens.portrait(data)
+	tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	tr.stretch_mode = TextureRect.STRETCH_SCALE
+	tr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	tr.size = size
+	tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return tr
 #this code should work for both CPU and Online
 #Hopefully it works how I intended and Online both players use WASD F
 # (Note on "WASD F": this screen itself is mouse-only - the WASD+F part is
@@ -80,7 +92,9 @@ var _picks: Dictionary = {}
 func _ready() -> void:
 	_is_online = GameManager.selected_mode == GameManager.Mode.ONLINE
 	# Coming back after a match: start on the character you just played.
-	_p1_choice = clampi(GameManager.player1_character, 0, GameManager.characters.size() - 1)
+	# (If you had picked Random, it stays Random - not the character it rolled.)
+	_p1_choice = GameManager.RANDOM_CHARACTER if GameManager.player1_random \
+		else clampi(GameManager.player1_character, 0, GameManager.characters.size() - 1)
 	if _is_online:
 		# Listen for the other player's "pick" message and for them leaving.
 		# (NetworkManager is an autoload that survived the scene change from
@@ -145,7 +159,11 @@ func _build_tiles() -> void:
 			face.size = Vector2(18, 18)
 			face.position = Vector2((TILE_W - 18) / 2.0, (tile_h - 18) / 2.0 - 8)
 			face.mouse_filter = Control.MOUSE_FILTER_IGNORE # so clicks pass through to the tile underneath
+			face.visible = false
 			btn.add_child(face)
+			var cat := _cat_rect(data, Vector2(31, 50))
+			cat.position = Vector2((TILE_W - 31) / 2.0, (tile_h - 50) / 2.0 - 10)
+			btn.add_child(cat)
 
 			var name_label := _make_label(data["name"].to_upper(), 13)
 			name_label.add_theme_constant_override("outline_size", 4)
@@ -255,7 +273,12 @@ func _build_panels() -> void:
 		face.size = Vector2(22, 22)
 		face.position = Vector2(34, 34)
 		face.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		face.visible = false
 		swatch.add_child(face)
+		var cat := _cat_rect({}, Vector2(46, 74))
+		cat.position = Vector2(22, 8)
+		cat.visible = false
+		swatch.add_child(cat)
 		# Shown instead of the face when the pick is Random.
 		var question := _make_label("?", 56)
 		question.size = Vector2(90, 90)
@@ -278,7 +301,7 @@ func _build_panels() -> void:
 
 		row.add_child(root)
 		panels.append({
-			"root": root, "style": style, "swatch": swatch, "face": face,
+			"root": root, "style": style, "swatch": swatch, "face": face, "cat": cat,
 			"question": question, "name": name_label, "info": info, "button": button,
 		})
 
@@ -379,6 +402,7 @@ func _refresh() -> void:
 		var choice: int = _get_choice(i) if (is_mine or not _is_online) else 0
 		var swatch: ColorRect = p["swatch"]
 		var face: ColorRect = p["face"]
+		var cat: TextureRect = p["cat"]
 		var question: Label = p["question"]
 		var name_label: Label = p["name"]
 		var info: Label = p["info"]
@@ -386,6 +410,7 @@ func _refresh() -> void:
 		var root: PanelContainer = p["root"]
 
 		face.visible = false
+		cat.visible = false
 		question.visible = false
 		if _is_online and not is_mine and on:
 			# Another player: don't reveal their pick before the match,
@@ -409,7 +434,8 @@ func _refresh() -> void:
 			var data: Dictionary = GameManager.characters[choice]
 			swatch.color = data["color"]
 			face.color = data.get("face_color", Color.BLACK)
-			face.visible = true
+			cat.texture = MatchScreens.portrait(data)
+			cat.visible = true
 			name_label.text = data["name"].to_upper()
 			info.text = "Player 1" if i == 0 else "CPU %d" % i
 		if _is_online and is_mine:
@@ -458,6 +484,7 @@ func _on_confirm_pressed() -> void:
 	if _confirmed:
 		return
 	var pick: int = _p1_choice
+	GameManager.player1_random = pick == GameManager.RANDOM_CHARACTER # remembered so the "?" is still selected next time
 	if pick == GameManager.RANDOM_CHARACTER:
 		pick = randi() % GameManager.characters.size() # roll it now so online sends a real character
 	GameManager.player1_character = pick

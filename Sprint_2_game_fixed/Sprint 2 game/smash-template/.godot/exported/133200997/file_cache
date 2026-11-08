@@ -12,3 +12,4 @@ res://addons/godot_super-wakatime/api_key_prompt.tscn::a6988a5ba43d5aa92a08f216c
 res://addons/godot_super-wakatime/counter.tscn::7f13ad35960e259f6de719f9785ce249::1792467077::res://.godot/exported/133200997/export-4af6c9115c1c285af5925fa1ce6a526e-counter.scn
 res://scenes/Almanac.tscn::e3049c7a28d3e2fb9cc9c0c3ca2fb6bc::1792982016::res://.godot/exported/133200997/export-3eaddc4e560be65ef2e42c65a94af633-Almanac.scn
 res://scenes/Leaderboard.tscn::847a0a3e564a8569a23fecab43a757eb::1793174481::res://.godot/exported/133200997/export-0d6381581c38775917edbdec89bb16e1-Leaderboard.scn
+res://scenes/Settings.tscn::9f35f57eba7381912692fc084022c2b5::1793355978::res://.godot/exported/133200997/export-aa0bebfe53779e3753807371083ff1c1-Settings.scn

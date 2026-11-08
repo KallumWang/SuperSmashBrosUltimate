@@ -1,4 +1,16 @@
 extends Control
+const MatchScreens := preload("res://scripts/match_screens.gd")
+
+## A pixel cat picture for a roster entry (what the old face square became).
+static func _cat_rect(data: Dictionary, size: Vector2) -> TextureRect:
+	var tr := TextureRect.new()
+	tr.texture = MatchScreens.portrait(data)
+	tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	tr.stretch_mode = TextureRect.STRETCH_SCALE
+	tr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	tr.size = size
+	tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return tr
 ## The ALMANAC: a reference book reachable from the main menu (the ALMANAC
 ## button that start_screen.gd adds under START). Two tabs:
 ##   CHARACTERS - pick anyone from the list to see their bio, stats and every
@@ -156,7 +168,11 @@ func _select_character(index: int) -> void:
 	face.color = data.get("face_color", Color.BLACK)
 	face.size = Vector2(22, 22)
 	face.position = Vector2(31, 31)
+	face.visible = false
 	swatch.add_child(face)
+	var cat := _cat_rect(data, Vector2(44, 70))
+	cat.position = Vector2(20, 7)
+	swatch.add_child(cat)
 
 	var texts := VBoxContainer.new()
 	texts.size_flags_horizontal = Control.SIZE_EXPAND_FILL

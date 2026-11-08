@@ -1,7 +1,7 @@
 class_name SpriteGen
 extends RefCounted
 
-## Builds the placeholder "Godot guy" animations entirely in code, so every
+## Builds the placeholder silly-cat animations entirely in code, so every
 ## character has working sprites with no art files. player.gd's _ready()
 ## calls SpriteGen.build(color, face_color) once per fighter and hands the
 ## result to the $Sprite AnimatedSprite2D. Every function here is static, so
@@ -50,7 +50,7 @@ static func build(color: Color, face_color: Color = Color.BLACK) -> SpriteFrames
 
 	# Lightened body = a "got hit" flash. Played by player.gd's take_hit().
 	_add_anim(frames, "hurt", [
-		_make_frame(color.lightened(0.45), face_color, 0, 3),
+		_make_frame(color.lightened(0.45), face_color, 0, 3, true),
 	], 6.0, false)
 
 	return frames
@@ -64,27 +64,82 @@ static func _add_anim(frames: SpriteFrames, anim_name: String, textures: Array, 
 	for t in textures:
 		frames.add_frame(anim_name, t)
 
-## Draws ONE frame of the guy into a fresh transparent image and turns it
-## into a texture. lean_x/lean_y don't move the whole body - they only
-## nudge the face and feet a little, which is enough to make the poses
-## read as different without drawing any real art.
-static func _make_frame(color: Color, face_color: Color, lean_x: float, lean_y: float) -> ImageTexture:
+## Draws ONE frame of the silly cat into a fresh transparent image and turns it
+## into a texture. A big white cat head (ears, black eyes, pink cheeks and nose,
+## whiskers, tongue out) on a small body in the character's colour. lean_x/lean_y
+## nudge the head, arms and feet so the poses read differently. `hurt` swaps the
+## eyes for squeezed-shut dashes.
+static func _make_frame(color: Color, _face_color: Color, lean_x: float, lean_y: float, hurt: bool = false) -> ImageTexture:
 	var img := Image.create_empty(W, H, false, Image.FORMAT_RGBA8)
 	img.fill(Color(0, 0, 0, 0)) # start fully transparent so only the shapes below show
 
-	# body
-	_fill(img, Vector2i(4, 6), Vector2i(W - 8, H - 10), color)
-	# face marker, nudged by the lean so poses read as slightly different
-	# (clampi keeps it from being pushed off the edge of the image)
-	var face_x: int = clampi(int(W / 2.0 - 5 + lean_x * 0.3), 2, W - 12)
-	var face_y: int = clampi(int(12 + lean_y * 0.3), 2, H - 20)
-	_fill(img, Vector2i(face_x, face_y), Vector2i(10, 10), face_color)
-	# feet - a darker shade of the body color, and they slide in opposite
-	# directions with lean_x so running looks like a little shuffle
-	_fill(img, Vector2i(int(6 + lean_x * 0.5), H - 8), Vector2i(10, 8), color.darkened(0.25))
-	_fill(img, Vector2i(int(W - 16 - lean_x * 0.5), H - 8), Vector2i(10, 8), color.darkened(0.25))
+	var ink := Color(0.12, 0.1, 0.14)
+	var fur := Color.WHITE.lerp(color, 0.15)
+	var pink := Color(1.0, 0.62, 0.72)
+	var ox: int = int(round(lean_x * 0.3))
+	var oy: int = int(round(lean_y * 0.5))
+
+	# body: white cat fur with the character's colour as a scarf and belly patch,
+	# little arms, a curled tail and round white paws
+	_outlined(img, Rect2i(30, 44, 8, 3), fur, ink) # tail out...
+	_outlined(img, Rect2i(35, 36, 3, 11), fur, ink) # ...and curling up
+	_outlined(img, Rect2i(11, 35, 18, 18), fur, ink)
+	_fill(img, Vector2i(13, 44), Vector2i(14, 6), color) # belly patch
+	_fill(img, Vector2i(10, 35), Vector2i(20, 4), color) # scarf
+	_fill(img, Vector2i(10, 35), Vector2i(20, 1), color.lightened(0.25))
+	_outlined(img, Rect2i(8 - int(lean_x * 0.2), 38, 4, 9), fur, ink)
+	_outlined(img, Rect2i(28 + int(lean_x * 0.5), 38, 4, 9), fur, ink)
+	# paws - white with a dark outline and a pink toe bean, shuffling opposite ways
+	for fx in [int(6 + lean_x * 0.5), int(W - 16 - lean_x * 0.5)]:
+		_outlined(img, Rect2i(fx, H - 8, 10, 7), fur, ink)
+		_fill(img, Vector2i(fx + 3, H - 5), Vector2i(4, 2), pink)
+
+	# ears (stair-stepped triangles) with pink insides
+	for r in 9:
+		_outlined_row(img, Rect2i(5 + ox, 0 + r + oy, 2 + r, 1), fur, ink)
+		_outlined_row(img, Rect2i(34 - (1 + r) + ox, 0 + r + oy, 2 + r, 1), fur, ink)
+	for r in range(3, 9):
+		_fill(img, Vector2i(8 + ox, r + oy), Vector2i(maxi(1, r - 2), 1), pink)
+		_fill(img, Vector2i(32 - maxi(1, r - 2) + ox, r + oy), Vector2i(maxi(1, r - 2), 1), pink)
+	# head (two overlapping rects = rounded corners)
+	for r in [Rect2i(5 + ox, 7 + oy, 30, 30), Rect2i(3 + ox, 9 + oy, 34, 26)]: # outlines first...
+		_fill(img, r.position - Vector2i(1, 1), r.size + Vector2i(2, 2), ink)
+	for r in [Rect2i(5 + ox, 7 + oy, 30, 30), Rect2i(3 + ox, 9 + oy, 34, 26)]: # ...then the fur over both
+		_fill(img, r.position, r.size, fur)
+	# eyes
+	if hurt:
+		_fill(img, Vector2i(10 + ox, 17 + oy), Vector2i(5, 2), ink)
+		_fill(img, Vector2i(25 + ox, 17 + oy), Vector2i(5, 2), ink)
+	else:
+		_fill(img, Vector2i(11 + ox, 14 + oy), Vector2i(3, 6), ink)
+		_fill(img, Vector2i(26 + ox, 14 + oy), Vector2i(3, 6), ink)
+		_fill(img, Vector2i(11 + ox, 14 + oy), Vector2i(1, 1), Color.WHITE)
+		_fill(img, Vector2i(26 + ox, 14 + oy), Vector2i(1, 1), Color.WHITE)
+	# cheeks, nose, "w" mouth, tongue sticking out
+	_fill(img, Vector2i(6 + ox, 22 + oy), Vector2i(5, 3), pink)
+	_fill(img, Vector2i(29 + ox, 22 + oy), Vector2i(5, 3), pink)
+	_fill(img, Vector2i(18 + ox, 22 + oy), Vector2i(4, 2), Color(0.95, 0.45, 0.55))
+	for px in [[16, 25], [17, 26], [18, 26], [19, 25], [20, 25], [21, 26], [22, 26], [23, 25]]:
+		_fill(img, Vector2i(int(px[0]) + ox, int(px[1]) + oy), Vector2i(1, 1), ink)
+	_fill(img, Vector2i(20 + ox, 27 + oy), Vector2i(5, 5), pink)
+	_fill(img, Vector2i(22 + ox, 27 + oy), Vector2i(1, 4), pink.darkened(0.25))
+	_fill(img, Vector2i(20 + ox, 31 + oy), Vector2i(5, 1), pink.darkened(0.15))
+	# whiskers
+	for wy in [26, 29]:
+		_fill(img, Vector2i(0 + ox, wy + oy), Vector2i(6, 1), ink)
+		_fill(img, Vector2i(34 + ox, wy + oy), Vector2i(6, 1), ink)
 
 	return ImageTexture.create_from_image(img)
+
+## A rectangle with a 1px dark outline around it.
+static func _outlined(img: Image, r: Rect2i, color: Color, ink: Color) -> void:
+	_fill(img, r.position - Vector2i(1, 1), r.size + Vector2i(2, 2), ink)
+	_fill(img, r.position, r.size, color)
+
+## Like _outlined but for a 1px-tall ear row: the outline is only left/right so rows stack cleanly.
+static func _outlined_row(img: Image, r: Rect2i, color: Color, ink: Color) -> void:
+	_fill(img, r.position - Vector2i(1, 0), r.size + Vector2i(2, 0), ink)
+	_fill(img, r.position, r.size, color)
 
 ## Fills a rectangle on the image. The intersection() line clips the
 ## rectangle to the image bounds first, so a shape that hangs off the edge
